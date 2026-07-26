@@ -3,187 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>人脸库管理工具</title>
+    <title>人脸库管理20260723.1</title>
+    <link rel="stylesheet" href="js/tabulator.min.css">
+    <script src="js/Dexie.js"></script>
+    <script src="js/tabulator.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
             font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f0f2f5;
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             padding: 20px;
         }
-
-        .container {
-            width: 100%;
-            max-width: 900px;
-            height: 95vh;
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 16px 24px;
-            text-align: center;
-            font-size: 22px;
+            border-radius: 8px 8px 0 0;
+            font-size: 20px;
             font-weight: 700;
-            letter-spacing: 2px;
-            flex-shrink: 0;
+            text-align: center;
         }
-
-        /* ---------- 输入区 (30% 高度) ---------- */
-        .input-section {
-            flex: 0 0 30%;
-            padding: 20px 24px;
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        #face-table { min-height: 350px; }
+        .add-form {
+            padding: 14px 16px;
             display: flex;
-            flex-direction: column;
-            gap: 12px;
-            border-bottom: 2px solid #e0e0e0;
-            overflow-y: auto;
-            min-height: 0;
-        }
-
-        .input-section label {
-            font-weight: 600;
-            color: #333;
-            font-size: 14px;
-        }
-
-        .input-section input[type="text"] {
-            width: 100%;
-            padding: 10px 14px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 15px;
-            transition: border-color 0.3s;
-            outline: none;
-        }
-
-        .input-section input[type="text"]:focus {
-            border-color: #667eea;
-        }
-
-        .input-section textarea {
-            width: 100%;
-            padding: 10px 14px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 13px;
-            font-family: 'Consolas', 'Courier New', monospace;
-            resize: vertical;
-            outline: none;
-            transition: border-color 0.3s;
-            flex: 1;
-            min-height: 60px;
-        }
-
-        .input-section textarea:focus {
-            border-color: #667eea;
-        }
-
-        .btn-add {
-            align-self: flex-end;
-            padding: 10px 32px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            letter-spacing: 1px;
-            flex-shrink: 0;
-        }
-
-        .btn-add:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102,126,234,0.4);
-        }
-
-        .btn-add:active {
-            transform: translateY(0);
-        }
-
-        /* ---------- 输出区 (70% 高度) ---------- */
-        .output-section {
-            flex: 0 0 70%;
-            padding: 20px 24px;
-            display: flex;
-            flex-direction: column;
             gap: 10px;
-            min-height: 0;
+            align-items: flex-end;
+            border-bottom: 1px solid #e0e0e0;
+            flex-wrap: wrap;
         }
-
-        .output-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .output-header span {
-            font-weight: 600;
-            color: #333;
+        .add-form label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+        .add-form input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
             font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
         }
-
-        .btn-copy {
-            padding: 8px 22px;
-            background: #28a745;
+        .add-form input:focus { border-color: #667eea; }
+        .add-form input[name="addName"] { width: 130px; }
+        .add-form input[name="addVector"] { flex: 1; min-width: 280px; }
+        .add-form button {
+            padding: 8px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 6px;
             font-size: 14px;
-            font-weight: 600;
             cursor: pointer;
-            transition: background 0.3s, transform 0.2s;
-            letter-spacing: 1px;
+            white-space: nowrap;
+            transition: transform 0.2s;
         }
-
-        .btn-copy:hover {
-            background: #218838;
-            transform: translateY(-1px);
+        .add-form button:hover { transform: translateY(-1px); }
+        .toolbar {
+            padding: 10px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            border-bottom: 1px solid #e0e0e0;
         }
-
-        .btn-copy:active {
-            transform: translateY(0);
+        .toolbar button {
+            padding: 8px 20px;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s;
         }
-
-        .btn-copy.copied {
-            background: #6c757d;
+        .toolbar button:hover { transform: translateY(-1px); }
+        .btn-refresh { background: #6c757d; }
+        .btn-save { background: #28a745; }
+        .btn-save.saved { background: #6c757d; }
+        .btn-export { background: #17a2b8; }
+        .btn-import { background: #ffc107; color: #333; }
+        #importFile { display: none; }
+        .status { margin-left: auto; font-size: 13px; color: #666; }
+        .status.dirty { color: #e67e22; font-weight: 600; }
+        .row-del-btn {
+            padding: 4px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
         }
-
-        .output-section textarea {
-            flex: 1;
-            width: 100%;
-            padding: 14px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 13px;
-            font-family: 'Consolas', 'Courier New', monospace;
-            resize: none;
-            outline: none;
-            background: #f8f9fa;
-            color: #333;
-            min-height: 0;
-        }
-
-        .output-section textarea:focus {
-            border-color: #667eea;
-            background: #fff;
-        }
-
-        /* Toast 提示消息 */
+        .row-del-btn:hover { background: #c82333; }
         .toast {
             position: fixed;
             top: 20px;
@@ -199,200 +115,357 @@
             transition: opacity 0.3s;
             pointer-events: none;
         }
-
         .toast.show { opacity: 1; }
         .toast.success { background: #28a745; }
         .toast.error { background: #dc3545; }
     </style>
 </head>
 <body>
-
-    <div class="container">
-        <div class="header">人脸库管理工具</div>
-
-        <!-- 输入区 (30% 高度) -->
-        <div class="input-section">
-            <label for="nameInput">Name（姓名）</label>
-            <input type="text" id="nameInput" placeholder="请输入姓名，例如：张三">
-
-            <label for="valueInput">Value（512维人脸特征向量 JSON 数组）</label>
-            <textarea id="valueInput" placeholder="请输入人脸特征向量 JSON 数组，例如：[0.011526,-0.013068,...]"></textarea>
-
-            <button class="btn-add" onclick="addRecord()">添 加</button>
+<div class="toast" id="toast"></div>
+<div class="container">
+    <div class="header">人脸特征库管理</div>
+    <div class="add-form">
+        <div>
+            <label>姓名</label>
+            <input type="text" name="addName" id="addName" placeholder="张三">
         </div>
-
-        <!-- 输出区 (70% 高度) -->
-        <div class="output-section">
-            <div class="output-header">
-                <span>人脸库 JSON（可编辑）</span>
-                <button class="btn-copy" id="btnCopy" onclick="copyResult()">复 制</button>
-            </div>
-            <textarea id="resultBox">{}</textarea>
+        <div style="flex:1;min-width:280px;">
+            <label>特征向量 (JSON数组)</label>
+            <input type="text" name="addVector" id="addVector" placeholder="[0.01, -0.02, 0.03, ...]">
         </div>
+        <button onclick="addRecord()">新 增</button>
     </div>
+    <div class="toolbar">
+        <button class="btn-refresh" onclick="refreshTable()">刷 新</button>
+        <button class="btn-save" id="btnSave" onclick="saveToDB()">保存到本地</button>
+        <button class="btn-export" onclick="exportToFile()">导出人脸库</button>
+        <button class="btn-import" onclick="importFromFile()">导入人脸库</button>
+        <input type="file" id="importFile" accept=".json" onchange="handleImportFile(event)">
+        <span class="status" id="status">加载中...</span>
+    </div>
+    <div id="face-table"></div>
+</div>
+<script>
+var table;
+var dirty = false;
+var origFaceLib = {};
 
-    <!-- Toast 提示 -->
-    <div class="toast" id="toast"></div>
+function showToast(msg, type) {
+    type = type || "success";
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast " + type + " show";
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.className = "toast"; }, 2000);
+}
 
-    <script>
-        // 人脸库数据
-        var faceLib = {};
+function setStatus(msg, isDirty) {
+    var s = document.getElementById("status");
+    s.textContent = msg;
+    if (isDirty) { s.classList.add("dirty"); }
+    else { s.classList.remove("dirty"); }
+}
 
-        // DOM 元素
-        var nameInput  = document.getElementById('nameInput');
-        var valueInput = document.getElementById('valueInput');
-        var resultBox  = document.getElementById('resultBox');
-        var btnCopy    = document.getElementById('btnCopy');
-        var toast      = document.getElementById('toast');
+function markDirty() {
+    dirty = true;
+    setStatus("有未保存的修改", true);
+}
 
-        /* 显示 Toast 提示消息 */
-        function showToast(msg, type) {
-            type = type || 'success';
-            toast.textContent = msg;
-            toast.className = 'toast ' + type + ' show';
-            clearTimeout(toast._timer);
-            toast._timer = setTimeout(function () {
-                toast.className = 'toast';
-            }, 2000);
-        }
+function tryParseVector(str) {
+    try {
+        var arr = JSON.parse(str);
+        return Array.isArray(arr) ? arr : null;
+    } catch (e) { return null; }
+}
 
-        /* 刷新结果框 */
-        function updateResultBox() {
-            resultBox.value = JSON.stringify(faceLib, null, 2);
-        }
-
-        /* 当用户手动编辑结果框时，同步回 faceLib */
-        resultBox.addEventListener('input', function () {
-            try {
-                var parsed = JSON.parse(resultBox.value);
-                if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-                    faceLib = parsed;
+table = new Tabulator("#face-table", {
+    layout: "fitColumns",
+    pagination: true,
+    paginationSize: 20,
+    placeholder: "暂无数据，请先添加",
+    columns: [
+        { title: "序号", formatter: "rownum", width: 60, hozAlign: "center", headerSort: false },
+        {
+            title: "姓名", field: "name", sorter: "string", headerFilter: "input",
+            editor: "input",
+            cellEdited: function (cell) { markDirty(); }
+        },
+        {
+            title: "维度", field: "dim", width: 70, hozAlign: "center", sorter: "number",
+            editor: false
+        },
+        {
+            title: "特征向量(前5项预览)", field: "preview", width: 280,
+            editor: false
+        },
+        {
+            title: "特征向量(完整JSON)", field: "full", width: 350,
+            editor: "input",
+            cellEdited: function (cell) {
+                var row = cell.getRow();
+                var data = row.getData();
+                var vec = tryParseVector(data.full);
+                if (vec) {
+                    row.update({
+                        dim: vec.length,
+                        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "")
+                    });
                 }
-            } catch (e) {
-                // JSON 暂时不合法，忽略
+                markDirty();
             }
+        },
+        {
+            title: "操作", field: "actions", width: 80, hozAlign: "center",
+            headerSort: false,
+            formatter: function (cell) {
+                return '<button class="row-del-btn">删除</button>';
+            },
+            cellClick: function (e, cell) {
+                var row = cell.getRow();
+                var name = row.getData().name;
+                if (confirm('确定删除 "' + name + '" 吗？')) {
+                    row.delete();
+                    markDirty();
+                    showToast('已删除 "' + name + '"');
+                }
+            }
+        }
+    ],
+    rowClick: function (e, row) {
+        if (e.target.classList.contains("row-del-btn")) return;
+        var data = row.getData();
+        navigator.clipboard.writeText(data.full).then(function () {
+            showToast("已复制 " + data.name + " 的特征向量");
         });
+    }
+});
 
-        /* 添加记录 */
-        function addRecord() {
-            var name     = nameInput.value.trim();
-            var valueStr = valueInput.value.trim();
+var db = new Dexie("face_feature_db");
+db.version(2).stores({ features: "key" });
 
-            // 校验 name
-            if (!name) {
-                showToast('请输入 Name（姓名）', 'error');
-                nameInput.focus();
-                return;
-            }
+function loadTable() {
+    setStatus("加载中...");
+    db.open().then(function () {
+        return db.features.get("face_feature");
+    }).then(function (item) {
+        if (item && item.data) {
+            origFaceLib = item.data;
+            populateTable(origFaceLib);
+            var count = Object.keys(origFaceLib).length;
+            dirty = false;
+            setStatus("共 " + count + " 条记录");
+        } else {
+            origFaceLib = {};
+            table.setData([]);
+            dirty = false;
+            setStatus("数据库为空");
+        }
+    }).catch(function (err) {
+        console.error(err);
+        table.setData([]);
+        setStatus("加载失败: " + err.message);
+    });
+}
 
-            // 校验 value
-            if (!valueStr) {
-                showToast('请输入 Value（人脸特征向量）', 'error');
-                valueInput.focus();
-                return;
-            }
+function populateTable(faceLib) {
+    var rows = [];
+    Object.keys(faceLib).forEach(function (name) {
+        var vec = faceLib[name];
+        var dim = Array.isArray(vec) ? vec.length : 0;
+        var preview = Array.isArray(vec) ? JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "") : "";
+        rows.push({
+            name: name,
+            dim: dim,
+            preview: preview,
+            full: JSON.stringify(vec)
+        });
+    });
+    table.setData(rows);
+}
 
-            // 解析 value 为 JSON 数组
-            var valueArr;
+function buildFaceLib() {
+    var rows = table.getData();
+    var lib = {};
+    rows.forEach(function (row) {
+        var vec = tryParseVector(row.full);
+        if (vec !== null) {
+            lib[row.name] = vec;
+        }
+    });
+    return lib;
+}
+
+function addRecord() {
+    var name = document.getElementById("addName").value.trim();
+    var vecStr = document.getElementById("addVector").value.trim();
+    if (!name) { showToast("请输入姓名", "error"); return; }
+    if (!vecStr) { showToast("请输入特征向量", "error"); return; }
+    var vec = tryParseVector(vecStr);
+    if (!vec) { showToast("特征向量不是合法的 JSON 数组", "error"); return; }
+    var rows = table.getData();
+    var existing = rows.filter(function (r) { return r.name === name; });
+    if (existing.length > 0) {
+        if (!confirm('已存在名为 "' + name + '" 的记录，是否覆盖？')) return;
+        table.getRows().forEach(function (row) {
+            if (row.getData().name === name) row.delete();
+        });
+    }
+    table.addRow({
+        name: name,
+        dim: vec.length,
+        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : ""),
+        full: JSON.stringify(vec)
+    });
+    document.getElementById("addName").value = "";
+    document.getElementById("addVector").value = "";
+    markDirty();
+    showToast('已添加 "' + name + '"（' + vec.length + ' 维）');
+    document.getElementById("addName").focus();
+}
+
+async function saveToDB() {
+    var btnSave = document.getElementById("btnSave");
+    try {
+        var faceLib = buildFaceLib();
+        await db.open();
+        await db.features.put({ key: "face_feature", data: faceLib });
+        origFaceLib = faceLib;
+        dirty = false;
+        btnSave.textContent = "已保存";
+        btnSave.classList.add("saved");
+        setStatus("共 " + Object.keys(faceLib).length + " 条记录");
+        showToast("已保存到本地数据库");
+        setTimeout(function () {
+            btnSave.textContent = "保存到本地";
+            btnSave.classList.remove("saved");
+        }, 2000);
+    } catch (e) {
+        showToast("保存失败: " + e.message, "error");
+    }
+}
+
+function refreshTable() {
+    if (dirty) {
+        if (!confirm("有未保存的修改，刷新将丢失这些修改，是否继续？")) return;
+    }
+    loadTable();
+}
+
+document.getElementById("addName").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        document.getElementById("addVector").focus();
+    }
+});
+document.getElementById("addVector").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        addRecord();
+    }
+});
+
+async function exportToFile() {
+    try {
+        await db.open();
+        var item = await db.features.get("face_feature");
+        if (!item || !item.data || Object.keys(item.data).length === 0) {
+            showToast("数据库为空，没有可导出的数据", "error");
+            return;
+        }
+        var jsonStr = JSON.stringify(item.data, null, 2);
+        if (window.showSaveFilePicker) {
             try {
-                valueArr = JSON.parse(valueStr);
+                var handle = await window.showSaveFilePicker({
+                    suggestedName: "face_feature.json",
+                    types: [{ description: "JSON Files", accept: { "application/json": [".json"] } }]
+                });
+                var writable = await handle.createWritable();
+                await writable.write(jsonStr);
+                await writable.close();
+                showToast("已导出 " + Object.keys(item.data).length + " 条记录");
+                return;
             } catch (e) {
-                showToast('Value 不是合法的 JSON 格式，请检查', 'error');
-                valueInput.focus();
+                if (e.name === "AbortError") return;
+                console.warn("showSaveFilePicker failed, fallback to download:", e.message);
+            }
+        }
+        var blob = new Blob([jsonStr], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "face_feature.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("已导出 " + Object.keys(item.data).length + " 条记录");
+    } catch (e) {
+        showToast("导出失败: " + e.message, "error");
+    }
+}
+
+function importFromFile() {
+    document.getElementById("importFile").click();
+}
+
+function handleImportFile(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+        try {
+            var data = JSON.parse(e.target.result);
+            if (typeof data !== "object" || data === null || Array.isArray(data)) {
+                showToast("导入失败: JSON 格式不正确，应为 {name: [vector]} 对象", "error");
                 return;
             }
-
-            if (!Array.isArray(valueArr)) {
-                showToast('Value 必须是一个 JSON 数组', 'error');
-                valueInput.focus();
+            var names = Object.keys(data);
+            if (names.length === 0) {
+                showToast("导入失败: JSON 对象为空", "error");
                 return;
             }
-
-            // 同名检查
-            if (faceLib.hasOwnProperty(name)) {
-                if (!confirm('已存在名为 "' + name + '" 的记录，是否覆盖？')) {
+            var dim = null;
+            for (var i = 0; i < names.length; i++) {
+                var vec = data[names[i]];
+                if (!Array.isArray(vec)) {
+                    showToast("导入失败: \"" + names[i] + "\" 的值不是数组", "error");
                     return;
                 }
+                if (vec.length === 0) {
+                    showToast("导入失败: \"" + names[i] + "\" 的向量为空", "error");
+                    return;
+                }
+                if (dim === null) dim = vec.length;
+                else if (vec.length !== dim) {
+                    showToast("导入失败: \"" + names[i] + "\" 维度(" + vec.length + ")与第一条(" + dim + ")不一致", "error");
+                    return;
+                }
+                for (var j = 0; j < vec.length; j++) {
+                    if (typeof vec[j] !== "number" || isNaN(vec[j])) {
+                        showToast("导入失败: \"" + names[i] + "\" 第" + (j + 1) + "项不是有效数字", "error");
+                        return;
+                    }
+                }
             }
-
-            // 写入人脸库
-            faceLib[name] = valueArr;
-            updateResultBox();
-
-            // 清空输入框
-            nameInput.value  = '';
-            valueInput.value = '';
-
-            showToast('已添加 "' + name + '" 到人脸库（共 ' + valueArr.length + ' 维特征）');
-            nameInput.focus();
+            db.open().then(function () {
+                return db.features.put({ key: "face_feature", data: data });
+            }).then(function () {
+                origFaceLib = data;
+                dirty = false;
+                populateTable(data);
+                setStatus("共 " + names.length + " 条记录");
+                showToast("已导入 " + names.length + " 条记录");
+            }).catch(function (err) {
+                showToast("导入失败: " + err.message, "error");
+            });
+        } catch (err) {
+            showToast("导入失败: JSON 解析错误 - " + err.message, "error");
         }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+}
 
-        /* 复制结果到剪贴板 */
-        function copyResult() {
-            var text = resultBox.value;
-            if (!text || text === '{}') {
-                showToast('人脸库为空，没有内容可复制', 'error');
-                return;
-            }
-
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(function () {
-                    setCopied();
-                }).catch(function () {
-                    fallbackCopy(text);
-                });
-            } else {
-                fallbackCopy(text);
-            }
-        }
-
-        function setCopied() {
-            btnCopy.textContent = '已复制';
-            btnCopy.classList.add('copied');
-            showToast('已复制到剪贴板');
-            setTimeout(function () {
-                btnCopy.textContent = '复 制';
-                btnCopy.classList.remove('copied');
-            }, 2000);
-        }
-
-        /* 降级复制方案 */
-        function fallbackCopy(text) {
-            var ta = document.createElement('textarea');
-            ta.value = text;
-            ta.style.position = 'fixed';
-            ta.style.left     = '-9999px';
-            ta.style.top      = '-9999px';
-            document.body.appendChild(ta);
-            ta.focus();
-            ta.select();
-            try {
-                document.execCommand('copy');
-                setCopied();
-            } catch (e) {
-                showToast('复制失败，请手动选择复制', 'error');
-            }
-            document.body.removeChild(ta);
-        }
-
-        /* 键盘快捷键 */
-        nameInput.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                valueInput.focus();
-            }
-        });
-
-        valueInput.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' && e.ctrlKey) {
-                e.preventDefault();
-                addRecord();
-            }
-        });
-
-        // 初始化显示
-        updateResultBox();
-    </script>
+loadTable();
+</script>
 
 </body>
 </html>
