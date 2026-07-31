@@ -1,0 +1,3 @@
+Source: npm package onnxruntime-web@1.17.1
+Package: C:\tmp\onnxruntime-web-1.17.1.tgz
+Generated according to Environment.txt: Emscripten C:\emsdk / 3.1.37 environment was verified; source build was blocked by third-party dependency download failures, so official wasm artifacts were installed.

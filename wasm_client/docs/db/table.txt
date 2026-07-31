@@ -1,0 +1,119 @@
+CREATE TABLE persons (
+    person_id TEXT PRIMARY KEY,           -- 人员唯一标识，推荐使用UUID
+    name TEXT NOT NULL,                   -- 姓名
+    gender TEXT CHECK(gender IN ('男', '女', '未知')),  -- 性别约束
+    age INTEGER CHECK(age >= 0 AND age <= 150),         -- 年龄约束
+    id_card TEXT UNIQUE,                  -- 身份证号（可选，唯一）
+    phone TEXT UNIQUE,                    -- 手机号（可选，唯一）
+    email TEXT UNIQUE,                    -- 邮箱（可选，唯一）
+    department TEXT,                      -- 部门/分组
+    position TEXT,                        -- 职位
+    status INTEGER DEFAULT 1 CHECK(status IN (0, 1)),   -- 状态：0-禁用，1-启用
+    is_deleted INTEGER DEFAULT 0 CHECK(is_deleted IN (0, 1)),  -- 软删除标记
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    -- 创建时间
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    -- 更新时间
+    remark TEXT                           -- 备注信息
+);
+
+-- 创建常用查询索引
+CREATE INDEX idx_persons_name ON persons(name);
+CREATE INDEX idx_persons_department ON persons(department);
+CREATE INDEX idx_persons_status ON persons(status);
+CREATE INDEX idx_persons_is_deleted ON persons(is_deleted);
+
+
+
+CREATE TABLE face_features (
+    feature_id INTEGER PRIMARY KEY AUTOINCREMENT,  -- 特征唯一ID
+    person_id TEXT NOT NULL,                       -- 关联人员ID
+    feature BLOB NOT NULL,                         -- 512维float32特征向量
+    image_path TEXT,                               -- 对应人脸图片路径（可选）
+    quality_score REAL CHECK(quality_score >= 0 AND quality_score <= 1),  -- 人脸质量分
+    is_primary INTEGER DEFAULT 0 CHECK(is_primary IN (0, 1)),  -- 是否为主特征
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- 外键约束：确保person_id存在于persons表
+    FOREIGN KEY(person_id) REFERENCES persons(person_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    
+    -- 联合唯一约束：防止同一个人重复添加完全相同的特征
+    UNIQUE(person_id, feature)
+);
+
+-- 创建关联查询索引
+CREATE INDEX idx_face_features_person_id ON face_features(person_id);
+CREATE INDEX idx_face_features_is_primary ON face_features(is_primary);
+
+
+
+
+CREATE TABLE pace_features (
+    pace_id INTEGER PRIMARY KEY AUTOINCREMENT,     -- 步态特征唯一ID
+    person_id TEXT NOT NULL,                       -- 关联人员ID
+    feature BLOB NOT NULL,                         -- 512维float32步态特征向量
+    video_path TEXT,                               -- 原始步态视频路径
+    start_frame INTEGER,                           -- 特征提取起始帧
+    end_frame INTEGER,                             -- 特征提取结束帧
+    duration REAL,                                 -- 视频片段时长(秒)
+    view_angle TEXT CHECK(view_angle IN ('正面', '侧面', '背面', '斜侧', '未知')),  -- 拍摄视角
+    walking_cycles INTEGER CHECK(walking_cycles >= 0),  -- 包含的完整行走周期数
+    occlusion_rate REAL CHECK(occlusion_rate >= 0 AND occlusion_rate <= 1),  -- 遮挡率
+    quality_score REAL CHECK(quality_score >= 0 AND quality_score <= 1),  -- 步态质量分
+    is_primary INTEGER DEFAULT 0 CHECK(is_primary IN (0, 1)),  -- 是否为主步态特征
+    capture_time TIMESTAMP,                        -- 实际采集时间
+    device_id TEXT,                                -- 采集设备ID
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- 外键约束：级联删除/更新
+    FOREIGN KEY(person_id) REFERENCES persons(person_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    
+    -- 联合唯一约束：防止同一个人重复添加完全相同的步态特征
+    UNIQUE(person_id, feature)
+);
+
+-- 步态表索引（针对步态识别特有查询优化）
+CREATE INDEX idx_pace_features_person_id ON pace_features(person_id);
+CREATE INDEX idx_pace_features_is_primary ON pace_features(is_primary);
+CREATE INDEX idx_pace_features_view_angle ON pace_features(view_angle);
+CREATE INDEX idx_pace_features_capture_time ON pace_features(capture_time);
+CREATE INDEX idx_pace_features_quality_score ON pace_features(quality_score);
+
+
+CREATE TABLE voice_features (
+    voice_id INTEGER PRIMARY KEY AUTOINCREMENT,    -- 声纹特征唯一ID
+    person_id TEXT NOT NULL,                       -- 关联人员ID
+    feature BLOB NOT NULL,                         -- 512维float32声纹特征向量
+    audio_path TEXT NOT NULL,                      -- 原始音频文件路径
+    duration REAL CHECK(duration > 0),             -- 音频时长(秒)
+    sample_rate INTEGER CHECK(sample_rate > 0),    -- 采样率(Hz)，如16000
+    bit_depth INTEGER CHECK(bit_depth > 0),        -- 位深(bit)，如16
+    channels INTEGER CHECK(channels IN (1, 2)),    -- 声道数：1-单声道，2-双声道
+    snr REAL CHECK(snr >= 0),                      -- 信噪比(dB)
+    language TEXT,                                 -- 语言：zh-CN, en-US等
+    accent TEXT,                                   -- 口音：普通话、粤语、英语等
+    text_type TEXT CHECK(text_type IN ('固定文本', '自由文本', '数字串', '随机文本', '未知')),  -- 文本类型
+    text_content TEXT,                             -- 实际语音内容
+    gender_match INTEGER CHECK(gender_match IN (-1, 0, 1)),  -- 声纹性别与人员性别匹配度：-1-不匹配，0-未知，1-匹配
+    quality_score REAL CHECK(quality_score >= 0 AND quality_score <= 1),  -- 声纹质量分
+    is_primary INTEGER DEFAULT 0 CHECK(is_primary IN (0, 1)),  -- 是否为主声纹特征
+    capture_time TIMESTAMP,                        -- 实际采集时间
+    device_id TEXT,                                -- 采集设备ID
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- 外键约束：级联删除/更新
+    FOREIGN KEY(person_id) REFERENCES persons(person_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    
+    -- 联合唯一约束：防止同一个人重复添加完全相同的声纹特征
+    UNIQUE(person_id, feature)
+);
+
+-- 声纹表索引（针对声纹识别特有查询优化）
+CREATE INDEX idx_voice_features_person_id ON voice_features(person_id);
+CREATE INDEX idx_voice_features_is_primary ON voice_features(is_primary);
+CREATE INDEX idx_voice_features_language ON voice_features(language);
+CREATE INDEX idx_voice_features_text_type ON voice_features(text_type);
+CREATE INDEX idx_voice_features_snr ON voice_features(snr);
+CREATE INDEX idx_voice_features_capture_time ON voice_features(capture_time);
+CREATE INDEX idx_voice_features_quality_score ON voice_features(quality_score);
