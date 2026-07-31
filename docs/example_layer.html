@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Example Layer - 人脸特征向量提取</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+  .container { max-width: 700px; width: 100%; background: #16213e; border-radius: 16px; padding: 40px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: center; }
+  h1 { font-size: 1.6em; margin-bottom: 8px; color: #e94560; }
+  .subtitle { font-size: 0.85em; color: #888; margin-bottom: 30px; }
+  .section { background: #0f3460; border-radius: 10px; padding: 18px; margin-bottom: 18px; text-align: left; }
+  .section h3 { font-size: 0.95em; color: #e94560; margin-bottom: 10px; border-bottom: 1px solid #1a1a4e; padding-bottom: 6px; }
+  button { padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: 600; transition: all 0.2s; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: #e94560; color: #fff; } .btn-primary:hover:not(:disabled) { background: #d13650; }
+  .btn-outline { background: transparent; border: 1px solid #e94560; color: #e94560; } .btn-outline:hover:not(:disabled) { background: rgba(233,69,96,0.1); }
+  textarea { width: 100%; min-height: 120px; padding: 10px; font-family: "Courier New", monospace; font-size: 0.75em; background: #1a1a2e; color: #0f0; border: 1px solid #333; border-radius: 6px; resize: vertical; word-break: break-all; }
+  .status { font-size: 0.85em; padding: 8px 12px; border-radius: 6px; margin-top: 8px; }
+  .status.info { background: #1a3a5c; color: #7ec8e3; }
+  .status.success { background: #1a3c1a; color: #7ee37e; }
+  .status.warn { background: #3c3a1a; color: #e3d77e; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .info-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .info-row span { font-size: 0.8em; color: #aaa; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Example Layer</h1>
+  <p class="subtitle">使用 layer.js 弹窗调用 extract.html，获取人脸特征向量</p>
+
+  <div class="section">
+    <h3>操作</h3>
+    <div class="btn-row">
+      <button class="btn-primary" id="btnOpen">获得特征向量</button>
+      <button class="btn-outline" id="btnClear" disabled>清空</button>
+    </div>
+    <div id="statusBox" class="status info" style="margin-top:12px;">点击按钮，在弹出的窗口中提取人脸特征向量</div>
+  </div>
+
+  <div class="section">
+    <h3>人脸特征</h3>
+    <textarea id="featureResult" readonly placeholder="提取的特征向量将显示在这里（JSON 格式，512 维）..."></textarea>
+    <div class="info-row">
+      <span id="vectorInfo">尚未提取</span>
+      <span id="timestamp"></span>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="js/layer.js"></script>
+<script>
+var btnOpen = document.getElementById('btnOpen');
+var btnClear = document.getElementById('btnClear');
+var featureResult = document.getElementById('featureResult');
+var statusBox = document.getElementById('statusBox');
+var vectorInfo = document.getElementById('vectorInfo');
+var timestamp = document.getElementById('timestamp');
+
+function getTimestamp() {
+  var now = new Date();
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  return now.getFullYear() + '-' +
+    pad(now.getMonth() + 1) + '-' +
+    pad(now.getDate()) + ' ' +
+    pad(now.getHours()) + ':' +
+    pad(now.getMinutes()) + ':' +
+    pad(now.getSeconds());
+}
+
+function updateVectorInfo() {
+  var val = featureResult.value.trim();
+  if (!val) {
+    vectorInfo.textContent = '尚未提取';
+    btnClear.disabled = true;
+    return;
+  }
+  try {
+    var arr = JSON.parse(val);
+    if (Array.isArray(arr)) {
+      vectorInfo.textContent = '已提取: ' + arr.length + ' 维特征向量';
+      btnClear.disabled = false;
+    } else {
+      vectorInfo.textContent = '格式错误';
+      btnClear.disabled = true;
+    }
+  } catch (e) {
+    vectorInfo.textContent = 'JSON 解析失败';
+    btnClear.disabled = true;
+  }
+}
+
+btnOpen.addEventListener('click', function() {
+  // layer.open: type=2 (iframe), open extract.html in popup
+  layer.open({
+    type: 2,
+    title: '提取人脸特征向量',
+    area: ['960px', '700px'],
+    content: 'extract.html',
+    btn: ['确定', '取消'],
+    yes: function(index) {
+      // Access the iframe to get the feature vector from #featureOutput
+      var iframeId = 'layui-layer-iframe' + index;
+      var iframe = document.getElementById(iframeId);
+      if (iframe && iframe.contentWindow) {
+        try {
+          var iframeDoc = iframe.contentWindow.document;
+          var outputEl = iframeDoc.getElementById('featureOutput');
+          if (outputEl && outputEl.value && outputEl.value.trim()) {
+            featureResult.value = outputEl.value;
+            statusBox.className = 'status success';
+            statusBox.innerHTML = '成功获取特征向量 (' + getTimestamp() + ')';
+            timestamp.textContent = getTimestamp();
+            updateVectorInfo();
+          } else {
+            statusBox.className = 'status warn';
+            statusBox.innerHTML = '未提取到特征向量，请先在弹窗中完成人脸检测和特征提取';
+          }
+        } catch (e) {
+          statusBox.className = 'status error';
+          statusBox.innerHTML = '无法读取弹窗内容: ' + e.message;
+        }
+      }
+      layer.close(index);
+    },
+    btn2: function(index) {
+      // Cancel button
+      statusBox.className = 'status info';
+      statusBox.innerHTML = '已取消操作 (' + getTimestamp() + ')';
+      layer.close(index);
+    },
+    success: function(layero, index) {
+      console.log('[layer] extract.html opened in iframe, index=' + index);
+    },
+    end: function() {
+      console.log('[layer] popup closed');
+    }
+  });
+});
+
+btnClear.addEventListener('click', function() {
+  featureResult.value = '';
+  vectorInfo.textContent = '尚未提取';
+  timestamp.textContent = '';
+  btnClear.disabled = true;
+  statusBox.className = 'status info';
+  statusBox.innerHTML = '已清空特征向量';
+});
+
+// Initialize
+updateVectorInfo();
+console.log('[main] example_layer.html loaded');
+</script>
+
+</body>
+</html>

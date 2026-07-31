@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Feature Extraction - MobileFaceNet + ONNX Runtime</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 20px; }
+  .container { max-width: 900px; width: 100%; background: #16213e; border-radius: 16px; padding: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  h1 { text-align: center; font-size: 1.6em; margin-bottom: 8px; color: #e94560; }
+  .subtitle { text-align: center; font-size: 0.85em; color: #888; margin-bottom: 24px; }
+  .section { background: #0f3460; border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  .section h3 { font-size: 0.95em; color: #e94560; margin-bottom: 10px; border-bottom: 1px solid #1a1a4e; padding-bottom: 6px; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  button { padding: 10px 22px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; transition: all 0.2s; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: #e94560; color: #fff; } .btn-primary:hover:not(:disabled) { background: #d13650; }
+  .btn-outline { background: transparent; border: 1px solid #e94560; color: #e94560; } .btn-outline:hover:not(:disabled) { background: rgba(233,69,96,0.1); }
+  #fileInput { display: none; }
+  .canvas-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .canvas-box { text-align: center; }
+  .canvas-box canvas, .canvas-box img { border: 2px solid #333; border-radius: 6px; background: #000; max-width: 100%; height: auto; }
+  .canvas-box .label { font-size: 0.8em; color: #aaa; margin-top: 4px; }
+  textarea { width: 100%; min-height: 90px; padding: 10px; font-family: "Courier New", monospace; font-size: 0.75em; background: #1a1a2e; color: #0f0; border: 1px solid #333; border-radius: 6px; resize: vertical; word-break: break-all; }
+  .status { font-size: 0.85em; padding: 8px 12px; border-radius: 6px; margin-top: 8px; }
+  .status.info { background: #1a3a5c; color: #7ec8e3; } .status.success { background: #1a3c1a; color: #7ee37e; }
+  .status.error { background: #3c1a1a; color: #e37e7e; } .status.warn { background: #3c3a1a; color: #e3d77e; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #alignedImg { width: 112px; height: 112px; image-rendering: pixelated; border: 2px solid #e94560; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Face Feature Extraction</h1>
+  <p class="subtitle">MobileFaceNet (w600k_mbf) + ONNX Runtime Web | 512-Dim Vector</p>
+  <div class="section">
+    <h3>System Status</h3>
+    <div id="initStatus" class="status info"><span class="spinner"></span> Initializing dependencies...</div>
+  </div>
+  <div class="section">
+    <h3>Stage 1: Select Image &amp; EXIF Correction</h3>
+    <div class="btn-row">
+      <button class="btn-primary" id="btnSelect" disabled>Select Image</button>
+      <span style="font-size:0.8em;color:#888;" id="fileInfo">No file selected</span>
+    </div>
+    <input type="file" id="fileInput" accept="image/jpeg,image/png">
+    <div id="exifInfo" style="font-size:0.78em;color:#aaa;margin-top:6px;"></div>
+  </div>
+  <div class="section">
+    <h3>Stage 2: Face Detection &amp; Confidence Filtering</h3>
+    <div id="detectStatus" class="status info">Waiting for image...</div>
+    <div class="canvas-row" style="margin-top:10px;">
+      <div class="canvas-box">
+        <canvas id="mainCanvas" width="640" height="480"></canvas>
+        <div class="label">Main Canvas (bbox + keypoints)</div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <h3>Stage 3: Face Alignment (Similarity Transform - 112x112)</h3>
+    <div id="alignStatus" class="status info">Waiting for detection...</div>
+    <div class="canvas-row" style="margin-top:10px;">
+      <div class="canvas-box">
+        <img id="alignedImg" src="" alt="Aligned Face" style="display:none;">
+        <canvas id="alignedCanvas" width="112" height="112" style="display:none;"></canvas>
+        <div class="label">Aligned Face (112x112)</div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <h3>Stage 4 &amp; 5: Feature Extraction &amp; Post-processing</h3>
+    <div class="btn-row">
+      <button class="btn-primary" id="btnExtract" disabled>Extract Feature</button>
+      <button class="btn-outline" id="btnCopy" disabled>Copy Feature</button>
+    </div>
+    <div id="extractStatus" class="status info" style="margin-top:8px;">Complete face alignment first</div>
+    <textarea id="featureOutput" readonly placeholder="Feature vector will appear here (JSON format, 512-dim)..."></textarea>
+  </div>
+</div>
+<script src="./assets/exifr/full.umd.js"></script>
+<script src="./assets/onnxruntime/ort.all.min.js"></script>
+<script type="module">
+import { FaceDetector, FilesetResolver } from './assets/vision_bundle.mjs';
+
+const btnSelect = document.getElementById('btnSelect');
+const fileInput = document.getElementById('fileInput');
+const fileInfo = document.getElementById('fileInfo');
+const exifInfo = document.getElementById('exifInfo');
+const mainCanvas = document.getElementById('mainCanvas');
+const alignedCanvas = document.getElementById('alignedCanvas');
+const alignedImg = document.getElementById('alignedImg');
+const btnExtract = document.getElementById('btnExtract');
+const btnCopy = document.getElementById('btnCopy');
+const featureOutput = document.getElementById('featureOutput');
+const initStatus = document.getElementById('initStatus');
+const detectStatus = document.getElementById('detectStatus');
+const alignStatus = document.getElementById('alignStatus');
+const extractStatus = document.getElementById('extractStatus');
+
+let faceDetector = null;
+let ortSession = null;
+let currentImageData = null;
+let currentDetection = null;
+let currentKeypoints = null;
+let alignedFacePixels = null;
+let isNCHW = false;
+
+const TEMPLATE_POINTS = [
+  { x: 38.0, y: 51.0 },
+  { x: 74.0, y: 51.0 },
+  { x: 56.0, y: 71.0 }
+];
+
+function setStatus(el, type, msg) {
+  el.className = 'status ' + type;
+  el.innerHTML = msg;
+}
+
+function showSpinner(el, msg) {
+  el.className = 'status info';
+  el.innerHTML = '<span class="spinner"></span> ' + msg;
+}
+
+async function initialize() {
+  try {
+    showSpinner(initStatus, 'Loading MediaPipe WASM...');
+    const vision = await FilesetResolver.forVisionTasks('./assets/wasm');
+    faceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: './assets/models/blaze_face_short_range.tflite' },
+      runningMode: 'IMAGE'
+    });
+    console.log('[init] MediaPipe FaceDetector ready (IMAGE mode)');
+
+    showSpinner(initStatus, 'Loading ONNX Runtime + MobileFaceNet...');
+    ortSession = await ort.InferenceSession.create('./assets/models/w600k_mbf.onnx', {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all'
+    });
+
+    // Dynamically detect model input shape.
+    // onnxruntime-web v1.17.x exposes inputNames/outputNames but NOT inputs[].shape.
+    // We try to read shape metadata; if unavailable, default to NCHW (correct for w600k_mbf).
+    let modelInputShape = null;
+    let outputDim = 512;
+
+    try {
+      // Attempt 1: ortSession.inputs array (available in some onnxruntime-web builds)
+      if (ortSession.inputs && ortSession.inputs[0] && ortSession.inputs[0].shape) {
+        modelInputShape = ortSession.inputs[0].shape;
+      }
+    } catch (_) {}
+
+    try {
+      // Attempt 2: ortSession.outputs array for output dim
+      if (ortSession.outputs && ortSession.outputs[0] && ortSession.outputs[0].shape) {
+        const outShape = ortSession.outputs[0].shape;
+        outputDim = outShape[outShape.length - 1];
+      }
+    } catch (_) {}
+
+    if (modelInputShape && modelInputShape.length === 4) {
+      if (modelInputShape[1] === 3) {
+        isNCHW = true;
+        console.log('[init] Detected NCHW [1, 3, 112, 112]');
+      } else if (modelInputShape[3] === 3) {
+        isNCHW = false;
+        console.log('[init] Detected NHWC [1, 112, 112, 3]');
+      } else {
+        console.warn('[init] Unexpected shape:', modelInputShape, '- defaulting NCHW');
+        isNCHW = true;
+      }
+    } else {
+      // w600k_mbf.onnx standard input is NCHW [1, 3, 112, 112]
+      console.log('[init] Shape metadata unavailable, defaulting NCHW [1, 3, 112, 112]');
+      isNCHW = true;
+    }
+
+    console.log('[init] Model input names:', ortSession.inputNames);
+    console.log('[init] Model output dim:', outputDim);
+
+    setStatus(initStatus, 'success', 'All dependencies loaded | MediaPipe FaceDetector (IMAGE) | ONNX MobileFaceNet | Output: ' + outputDim + ' dims');
+    btnSelect.disabled = false;
+
+  } catch (err) {
+    console.error('[init] Failed:', err);
+    setStatus(initStatus, 'error', 'Init failed: ' + err.message);
+  }
+}
+
+
+btnSelect.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  fileInfo.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+  setStatus(detectStatus, 'info', 'Processing image...');
+  setStatus(alignStatus, 'info', 'Waiting for detection...');
+  setStatus(extractStatus, 'info', 'Complete face alignment first');
+  currentDetection = null;
+  currentKeypoints = null;
+  alignedFacePixels = null;
+  btnExtract.disabled = true;
+  btnCopy.disabled = true;
+  featureOutput.value = '';
+  alignedImg.style.display = 'none';
+  alignedCanvas.style.display = 'none';
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    console.log('[stage1] ArrayBuffer size:', arrayBuffer.byteLength);
+
+    const [exifData, imageBitmap] = await Promise.all([
+      parseExifOrientation(arrayBuffer, file),
+      loadImageBitmap(file)
+    ]);
+
+    let rotationAngle = 0;
+    let swapWH = false;
+
+    if (exifData && exifData.orientation) {
+      const ori = exifData.orientation;
+      exifInfo.textContent = 'EXIF Orientation: ' + ori;
+      switch (ori) {
+        case 1: rotationAngle = 0;          swapWH = false; break;
+        case 2: rotationAngle = 0;          swapWH = false; break;
+        case 3: rotationAngle = Math.PI;    swapWH = false; break;
+        case 4: rotationAngle = Math.PI;    swapWH = false; break;
+        case 5: rotationAngle = Math.PI/2;  swapWH = true;  break;
+        case 6: rotationAngle = Math.PI/2;  swapWH = true;  break;
+        case 7: rotationAngle = -Math.PI/2; swapWH = true;  break;
+        case 8: rotationAngle = -Math.PI/2; swapWH = true;  break;
+        default: rotationAngle = 0; swapWH = false;
+      }
+      console.log('[stage1] EXIF ori:', ori, 'rotation:', (rotationAngle * 180 / Math.PI).toFixed(0) + 'deg');
+    } else {
+      exifInfo.textContent = 'No EXIF orientation info';
+    }
+
+    let imgW = imageBitmap.width;
+    let imgH = imageBitmap.height;
+    if (swapWH) [imgW, imgH] = [imgH, imgW];
+
+    const MAX_SIZE = 640, MIN_SIZE = 160;
+    let scale = 1.0;
+    const maxDim = Math.max(imgW, imgH);
+    if (maxDim > MAX_SIZE) scale = MAX_SIZE / maxDim;
+    const minDim = Math.min(imgW, imgH);
+    if (minDim * scale < MIN_SIZE) {
+      scale = MIN_SIZE / minDim;
+      if (maxDim * scale > MAX_SIZE) scale = MAX_SIZE / maxDim;
+    }
+
+    let canvasW = Math.round(imgW * scale);
+    let canvasH = Math.round(imgH * scale);
+    if (swapWH) [canvasW, canvasH] = [canvasH, canvasW];
+
+    console.log('[stage1] Original:', imgW, 'x', imgH, '-> Canvas:', canvasW, 'x', canvasH);
+
+    mainCanvas.width = canvasW;
+    mainCanvas.height = canvasH;
+    const ctx = mainCanvas.getContext('2d');
+    ctx.clearRect(0, 0, canvasW, canvasH);
+
+    if (rotationAngle !== 0) {
+      ctx.save();
+      ctx.translate(canvasW / 2, canvasH / 2);
+      ctx.rotate(rotationAngle);
+      ctx.drawImage(imageBitmap, -imgW / 2 * scale, -imgH / 2 * scale, imgW * scale, imgH * scale);
+      ctx.restore();
+    } else {
+      ctx.drawImage(imageBitmap, 0, 0, canvasW, canvasH);
+    }
+
+    currentImageData = ctx.getImageData(0, 0, canvasW, canvasH);
+    console.log('[stage1] Image corrected and drawn');
+
+    await runFaceDetection();
+
+  } catch (err) {
+    console.error('[stage1] Failed:', err);
+    setStatus(detectStatus, 'error', 'Image processing failed: ' + err.message);
+  }
+});
+
+async function parseExifOrientation(arrayBuffer, file) {
+  try {
+    if (typeof exifr !== 'undefined' && exifr.parse) {
+      return await exifr.parse(arrayBuffer, ['Orientation']);
+    }
+    return null;
+  } catch (err) {
+    console.warn('[exif] Parse warning:', err.message);
+    return null;
+  }
+}
+
+async function loadImageBitmap(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      createImageBitmap(img).then(resolve).catch(() => resolve(img));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Image load failed'));
+    };
+    img.src = url;
+  });
+}
+
+
+async function runFaceDetection() {
+  if (!faceDetector || !currentImageData) {
+    setStatus(detectStatus, 'error', 'Detector or image not ready');
+    return;
+  }
+
+  showSpinner(detectStatus, 'Running face detection...');
+
+  try {
+    const result = faceDetector.detect(mainCanvas);
+    const detections = result.detections || [];
+    console.log('[stage2] Raw detections:', detections.length);
+
+    if (detections.length === 0) {
+      setStatus(detectStatus, 'warn', 'No faces detected');
+      setStatus(alignStatus, 'info', 'Waiting for detection...');
+      clearFeatureOutput();
+      return;
+    }
+
+    const validDetections = detections.filter(d => getDetectionScore(d) > 0.7);
+    console.log('[stage2] Valid detections (score > 0.7):', validDetections.length);
+
+    if (validDetections.length === 0) {
+      setStatus(detectStatus, 'warn', 'No valid faces (all scores <= 0.7). Please try another photo.');
+      setStatus(alignStatus, 'info', 'Waiting for detection...');
+      clearFeatureOutput();
+      drawDetections(detections, mainCanvas);
+      return;
+    }
+
+    let bestDetection = validDetections[0];
+    let bestScore = getDetectionScore(bestDetection);
+    for (let i = 1; i < validDetections.length; i++) {
+      const score = getDetectionScore(validDetections[i]);
+      if (score > bestScore) { bestScore = score; bestDetection = validDetections[i]; }
+    }
+
+    currentDetection = bestDetection;
+    console.log('[stage2] Best score:', bestScore.toFixed(4));
+
+    const keypoints = bestDetection.keypoints || [];
+    if (keypoints.length < 3) {
+      setStatus(detectStatus, 'error', 'Not enough keypoints (need >= 3)');
+      return;
+    }
+
+    // MediaPipe FaceDetection 6 keypoints (person's perspective, NORMALIZED 0..1):
+    //   0=right_eye (appears on LEFT side of image)
+    //   1=left_eye  (appears on RIGHT side of image)
+    //   2=nose_tip
+    // Template (person's perspective): left_eye=(38,51), right_eye=(74,51), nose=(56,71)
+    //
+    // Spatial mapping: LEFT side of image → template left  (38,51)
+    //                  RIGHT side of image → template right (74,51)
+    // So: keypoints[0] (left side) → template[0]; keypoints[1] (right side) → template[1]
+    const imgW = mainCanvas.width;
+    const imgH = mainCanvas.height;
+    currentKeypoints = [
+      { x: keypoints[0].x * imgW, y: keypoints[0].y * imgH }, // person right eye (left in img) → template left
+      { x: keypoints[1].x * imgW, y: keypoints[1].y * imgH }, // person left eye (right in img) → template right
+      { x: keypoints[2].x * imgW, y: keypoints[2].y * imgH }  // nose tip
+    ];
+
+    console.log('[stage2] Keypoints (pixels): LEye:', currentKeypoints[0], 'REye:', currentKeypoints[1], 'Nose:', currentKeypoints[2]);
+
+    drawDetection(bestDetection, mainCanvas, bestScore);
+
+    setStatus(detectStatus, 'success', 'Detected ' + validDetections.length + ' valid face(s), best score: ' + bestScore.toFixed(4));
+
+    await alignFace();
+
+  } catch (err) {
+    console.error('[stage2] Failed:', err);
+    setStatus(detectStatus, 'error', 'Face detection failed: ' + err.message);
+  }
+}
+
+function getDetectionScore(detection) {
+  if (detection.categories && detection.categories.length > 0) {
+    return detection.categories[0].score;
+  }
+  if (typeof detection.score === 'number') return detection.score;
+  return 0;
+}
+
+function drawDetections(detections, canvas) {
+  const ctx = canvas.getContext('2d');
+  if (currentImageData) ctx.putImageData(currentImageData, 0, 0);
+  const cw = canvas.width, ch = canvas.height;
+  for (const det of detections) {
+    const bbox = det.boundingBox;
+    if (!bbox) continue;
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bbox.originX, bbox.originY, bbox.width, bbox.height);
+    const kps = det.keypoints || [];
+    for (const kp of kps) {
+      ctx.fillStyle = '#00ff00';
+      ctx.beginPath();
+      ctx.arc(kp.x * cw, kp.y * ch, 3, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+}
+
+function drawDetection(detection, canvas, score) {
+  const ctx = canvas.getContext('2d');
+  if (currentImageData) ctx.putImageData(currentImageData, 0, 0);
+
+  const bbox = detection.boundingBox;
+  if (!bbox) return;
+
+  ctx.strokeStyle = '#e94560';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(bbox.originX, bbox.originY, bbox.width, bbox.height);
+
+  ctx.fillStyle = '#e94560';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText((score * 100).toFixed(1) + '%', bbox.originX, bbox.originY - 6);
+
+  const kps = detection.keypoints || [];
+  const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff'];
+  const labels = ['R-Eye', 'L-Eye', 'Nose', 'Mouth', 'L-Ear', 'R-Ear'];
+  const cw = canvas.width, ch = canvas.height;
+
+  for (let i = 0; i < kps.length; i++) {
+    const kp = kps[i];
+    const px = kp.x * cw, py = kp.y * ch;
+    ctx.fillStyle = colors[i] || '#fff';
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px monospace';
+    ctx.fillText(labels[i] || i, px + 6, py - 6);
+  }
+}
+
+
+async function alignFace() {
+  if (!currentKeypoints || !currentImageData) {
+    setStatus(alignStatus, 'error', 'Alignment data incomplete');
+    return;
+  }
+
+  showSpinner(alignStatus, 'Computing similarity transform...');
+
+  try {
+    // Compute similarity transform matrix components
+    const M = computeSimilarityTransform(currentKeypoints, TEMPLATE_POINTS);
+    const { scale, cosT, sinT, tx, ty } = M;
+
+    const offCtx = alignedCanvas.getContext('2d');
+    // Ensure canvas bitmap is clean and properly sized
+    alignedCanvas.width = 112;
+    alignedCanvas.height = 112;
+    offCtx.clearRect(0, 0, 112, 112);
+
+    // --- Step 1: Draw source image with similarity transform ---
+    // Canvas 2D setTransform(a,b,c,d,e,f) maps image (x,y) to canvas (x',y'):
+    //   x' = a*x + c*y + e
+    //   y' = b*x + d*y + f
+    // Our forward similarity transform:
+    //   dx = scale*(cosT*sx - sinT*sy) + tx
+    //   dy = scale*(sinT*sx + cosT*sy) + ty
+    // So: a=scale*cosT, b=scale*sinT, c=-scale*sinT, d=scale*cosT, e=tx, f=ty
+    offCtx.save();
+    offCtx.setTransform(
+      scale * cosT,  scale * sinT,
+      -scale * sinT, scale * cosT,
+      tx, ty
+    );
+    offCtx.imageSmoothingEnabled = true;
+    offCtx.imageSmoothingQuality = 'medium';
+    offCtx.drawImage(mainCanvas, 0, 0);
+    offCtx.restore();
+
+    // --- Step 2: BORDER_REPLICATE – fill transparent areas with nearest edge pixel ---
+    replicateBorder(offCtx);
+
+    // --- Step 3: Read aligned pixels for feature extraction ---
+    const alignedImageData = offCtx.getImageData(0, 0, 112, 112);
+    alignedFacePixels = new Uint8ClampedArray(alignedImageData.data);
+
+    // --- Step 4: Display aligned face (only img, canvas stays hidden for pixel extraction) ---
+    alignedCanvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      if (alignedImg.src && alignedImg.src.startsWith('blob:')) URL.revokeObjectURL(alignedImg.src);
+      alignedImg.src = url;
+      alignedImg.style.display = 'block';
+    }, 'image/png');
+
+    setStatus(alignStatus, 'success', 'Face aligned (Similarity Transform -> 112x112, Canvas 2D + BORDER_REPLICATE)');
+    btnExtract.disabled = false;
+    setStatus(extractStatus, 'info', 'Ready - click Extract Feature');
+
+  } catch (err) {
+    console.error('[stage3] Failed:', err);
+    setStatus(alignStatus, 'error', 'Face alignment failed: ' + err.message);
+  }
+}
+
+/**
+ * BORDER_REPLICATE: fill any fully-transparent pixels in the 112x112 aligned canvas
+ * by copying the nearest non-transparent pixel (horizontal/vertical scan).
+ */
+function replicateBorder(ctx) {
+  const imgData = ctx.getImageData(0, 0, 112, 112);
+  const d = imgData.data;
+  const W = 112, H = 112;
+
+  // First pass: scan from top/bottom to fill transparent rows
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      if (d[idx + 3] === 0) {
+        // Find nearest non-transparent pixel by expanding search radius
+        let found = false;
+        for (let r = 1; r < Math.max(W, H) && !found; r++) {
+          for (let dy = -r; dy <= r && !found; dy++) {
+            for (let dx = -r; dx <= r && !found; dx++) {
+              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+              const nx = x + dx, ny = y + dy;
+              if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+              const nidx = (ny * W + nx) * 4;
+              if (d[nidx + 3] > 0) {
+                d[idx]     = d[nidx];
+                d[idx + 1] = d[nidx + 1];
+                d[idx + 2] = d[nidx + 2];
+                d[idx + 3] = 255;
+                found = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Compute similarity transform matrix components (4 DOF: scale, theta, tx, ty).
+ * Returns plain object { scale, cosT, sinT, tx, ty }.
+ */
+function computeSimilarityTransform(srcPoints, dstPoints) {
+  const [sx1, sy1] = [srcPoints[0].x, srcPoints[0].y];
+  const [sx2, sy2] = [srcPoints[1].x, srcPoints[1].y];
+  const [sx3, sy3] = [srcPoints[2].x, srcPoints[2].y];
+
+  const [dx1, dy1] = [dstPoints[0].x, dstPoints[0].y];
+  const [dx2, dy2] = [dstPoints[1].x, dstPoints[1].y];
+  const [dx3, dy3] = [dstPoints[2].x, dstPoints[2].y];
+
+  const srcEyeDist = Math.sqrt((sx2 - sx1) ** 2 + (sy2 - sy1) ** 2);
+  const dstEyeDist = Math.sqrt((dx2 - dx1) ** 2 + (dy2 - dy1) ** 2);
+  const scale = dstEyeDist / srcEyeDist;
+
+  const srcAngle = Math.atan2(sy2 - sy1, sx2 - sx1);
+  const dstAngle = Math.atan2(dy2 - dy1, dx2 - dx1);
+  const theta = dstAngle - srcAngle;
+
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+
+  const nx = scale * (cosT * sx3 - sinT * sy3);
+  const ny = scale * (sinT * sx3 + cosT * sy3);
+  const tx = dx3 - nx;
+  const ty = dy3 - ny;
+
+  console.log('[transform] scale:', scale.toFixed(4),
+    'theta:', (theta * 180 / Math.PI).toFixed(2) + 'deg',
+    'tx:', tx.toFixed(2), 'ty:', ty.toFixed(2));
+
+  return { scale, cosT, sinT, tx, ty };
+}
+
+
+btnExtract.addEventListener('click', async () => {
+  if (!ortSession || !alignedFacePixels) {
+    setStatus(extractStatus, 'error', 'ONNX model or aligned face data not ready');
+    return;
+  }
+
+  showSpinner(extractStatus, 'Running MobileFaceNet inference...');
+  btnExtract.disabled = true;
+
+  try {
+    const pixels = alignedFacePixels;
+    const rgb = new Float32Array(112 * 112 * 3);
+
+    // Pixel normalization: (pixel/255 - 0.5) * 2 -> [-1, +1]
+    for (let i = 0; i < 112 * 112; i++) {
+      rgb[i * 3]     = (pixels[i * 4]     / 255.0 - 0.5) * 2;
+      rgb[i * 3 + 1] = (pixels[i * 4 + 1] / 255.0 - 0.5) * 2;
+      rgb[i * 3 + 2] = (pixels[i * 4 + 2] / 255.0 - 0.5) * 2;
+    }
+
+    let tensorData, tensorShape;
+
+    if (isNCHW) {
+      tensorShape = [1, 3, 112, 112];
+      tensorData = new Float32Array(3 * 112 * 112);
+      for (let i = 0; i < 112 * 112; i++) {
+        tensorData[i]                 = rgb[i * 3];
+        tensorData[112 * 112 + i]     = rgb[i * 3 + 1];
+        tensorData[2 * 112 * 112 + i] = rgb[i * 3 + 2];
+      }
+    } else {
+      tensorShape = [1, 112, 112, 3];
+      tensorData = rgb;
+    }
+
+    console.log('[stage4] Tensor shape:', tensorShape, 'NCHW:', isNCHW);
+
+    const inputName = ortSession.inputNames[0];
+    const outputName = ortSession.outputNames[0];
+    const inputTensor = new ort.Tensor('float32', tensorData, tensorShape);
+
+    const feeds = {};
+    feeds[inputName] = inputTensor;
+
+    const results = await ortSession.run(feeds);
+    const outputTensor = results[outputName];
+    const rawVector = Array.from(outputTensor.data);
+
+    console.log('[stage4] Raw output length:', rawVector.length);
+
+    const featureVector = postProcess(rawVector);
+
+    // Output as JSON array with 6 decimal places
+    const jsonOutput = JSON.stringify(featureVector.map(v => parseFloat(v.toFixed(6))));
+    featureOutput.value = jsonOutput;
+
+    setStatus(extractStatus, 'success', 'Feature extraction complete | ' + featureVector.length + '-dim L2 normalized vector');
+    btnCopy.disabled = false;
+    btnExtract.disabled = false;
+
+  } catch (err) {
+    console.error('[stage4] Failed:', err);
+    setStatus(extractStatus, 'error', 'Feature extraction failed: ' + err.message);
+    btnExtract.disabled = false;
+  }
+});
+
+function postProcess(rawVector) {
+  // Zero-vector check
+  let sumSq = 0;
+  for (let i = 0; i < rawVector.length; i++) {
+    sumSq += rawVector[i] * rawVector[i];
+  }
+  const l2Norm = Math.sqrt(sumSq);
+
+  if (l2Norm < 1e-8) {
+    throw new Error('Inference anomaly: feature vector is all zeros');
+  }
+
+  console.log('[stage5] L2 norm:', l2Norm.toFixed(6));
+
+  // L2 normalization
+  const normalized = rawVector.map(v => v / l2Norm);
+
+  // Verification
+  let checkSumSq = 0;
+  for (let i = 0; i < normalized.length; i++) {
+    checkSumSq += normalized[i] * normalized[i];
+  }
+  console.log('[stage5] Normalized L2 norm:', Math.sqrt(checkSumSq).toFixed(6));
+
+  return normalized;
+}
+
+btnCopy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(featureOutput.value);
+    const origText = btnCopy.textContent;
+    btnCopy.textContent = 'Copied!';
+    setTimeout(() => { btnCopy.textContent = origText; }, 1500);
+  } catch (err) {
+    featureOutput.select();
+    document.execCommand('copy');
+  }
+});
+
+function clearFeatureOutput() {
+  featureOutput.value = '';
+  btnCopy.disabled = true;
+  btnExtract.disabled = true;
+  alignedFacePixels = null;
+  alignedImg.style.display = 'none';
+  alignedCanvas.style.display = 'none';
+}
+
+initialize();
+console.log('[main] extract.html loaded');
+</script>
+
+</body>
+</html>

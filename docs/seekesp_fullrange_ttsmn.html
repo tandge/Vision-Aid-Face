@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 摄像头识人20260723.1</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 20px; }
+  .container { max-width: 900px; width: 100%; background: #16213e; border-radius: 16px; padding: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  h1 { text-align: center; font-size: 1.6em; margin-bottom: 8px; color: #e94560; }
+  .subtitle { text-align: center; font-size: 0.85em; color: #888; margin-bottom: 24px; }
+
+  /* Model selection */
+  .model-select-row { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 18px; background: #0f3460; border-radius: 10px; padding: 14px 18px; }
+  .model-select-row label.model-select-label { font-size: 0.9em; color: #e94560; font-weight: 600; white-space: nowrap; }
+  .model-select-row .inline-row { display: flex; align-items: center; gap: 10px; }
+	  .model-select-row select { flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #1a3a5c; background: #1a1a2e; color: #e0e0e0; font-size: 0.9em; cursor: pointer; outline: none; }
+  .model-select-row select:focus { border-color: #e94560; }
+  .model-select-row .model-hint { font-size: 0.78em; color: #888; }
+  .model-select-row .model-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; background: rgba(233,69,96,0.2); color: #e94560; white-space: nowrap; }
+
+  .section { background: #0f3460; border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  .section h3, .model-select-row h3 { font-size: 0.95em; color: #e94560; margin-bottom: 10px; border-bottom: 1px solid #1a1a4e; padding-bottom: 6px; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  button { padding: 10px 22px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; transition: all 0.2s; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: #e94560; color: #fff; } .btn-primary:hover:not(:disabled) { background: #d13650; }
+  .btn-stop { background: #f44336; color: #fff; } .btn-stop:hover:not(:disabled) { background: #d32f2f; }
+  .btn-outline { background: transparent; border: 1px solid #e94560; color: #e94560; } .btn-outline:hover:not(:disabled) { background: rgba(233,69,96,0.1); }
+  .camera-box { text-align: center; }
+  #cameraCanvas { border: 2px solid #333; border-radius: 6px; background: #000; max-width: 100%; height: auto; }
+  .camera-box .label { font-size: 0.8em; color: #aaa; margin-top: 4px; }
+  textarea { width: 100%; min-height: 90px; padding: 10px; font-family: "Courier New", monospace; font-size: 0.75em; background: #1a1a2e; color: #0f0; border: 1px solid #333; border-radius: 6px; resize: vertical; word-break: break-all; }
+  .status { font-size: 0.85em; padding: 8px 12px; border-radius: 6px; margin-top: 8px; }
+  .status.info { background: #1a3a5c; color: #7ec8e3; }
+  .status.success { background: #1a3c1a; color: #7ee37e; }
+  .status.error { background: #3c1a1a; color: #e37e7e; }
+  .status.warn { background: #3c3a1a; color: #e3d77e; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .threshold-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .threshold-row label { font-size: 0.85em; color: #aaa; }
+  .threshold-row input[type="range"] { flex: 1; min-width: 120px; accent-color: #e94560; }
+  .threshold-row span { font-size: 0.85em; color: #e94560; font-weight: 600; min-width: 36px; }
+  .detect-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .detect-indicator.active { background: #4caf50; box-shadow: 0 0 8px #4caf50; animation: pulse 1s infinite; }
+  .detect-indicator.inactive { background: #666; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .info-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .info-row span { font-size: 0.8em; color: #aaa; }
+
+.url-row { display: flex; align-items: center; gap: 10px; }
+  .url-row label { font-size: 0.85em; color: #aaa; white-space: nowrap; }
+  .url-row input[type="text"] { flex: 1; padding: 8px 12px; font-size: 0.85em; background: #1a1a2e; color: #e0e0e0; border: 1px solid #333; border-radius: 6px; }
+  #detectCanvas { display: none; }
+
+  /* TTS voice indicator */
+  .voice-indicator { display: none; align-items: center; gap: 6px; font-size: 0.8em; color: #7ee37e; }
+  .voice-indicator.active { display: flex; }
+  .voice-wave { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+  .voice-wave span { display: inline-block; width: 3px; background: #4caf50; border-radius: 1px; animation: wave 0.6s ease-in-out infinite; }
+  .voice-wave span:nth-child(1) { height: 6px;  animation-delay: 0.0s; }
+  .voice-wave span:nth-child(2) { height: 12px; animation-delay: 0.1s; }
+  .voice-wave span:nth-child(3) { height: 8px;  animation-delay: 0.2s; }
+  .voice-wave span:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+  .voice-wave span:nth-child(5) { height: 5px;  animation-delay: 0.4s; }
+  @keyframes wave { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.4); } }
+
+  /* Face library info */
+  .lib-info { font-size: 0.82em; color: #aaa; margin-top: 6px; }
+
+  /* Multi-face result display */
+  .face-result-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .face-result-item { display: flex; align-items: center; gap: 10px; background: #0a1a30; border-radius: 8px; padding: 8px 14px; border: 1px solid #1a3a5c; font-size: 0.85em; }
+  .face-result-item .face-index { font-size: 1.1em; font-weight: 700; color: #e94560; min-width: 24px; text-align: center; }
+  .face-result-item .face-info { flex: 1; }
+  .face-result-item .face-info .name { font-weight: 700; }
+  .face-result-item .face-info .name.matched { color: #4caf50; }
+  .face-result-item .face-info .name.unmatched { color: #f44336; }
+  .face-result-item .face-info .detail { font-size: 0.8em; color: #888; margin-top: 2px; }
+  .face-result-item .face-badge { padding: 3px 10px; border-radius: 4px; font-size: 0.8em; font-weight: 700; white-space: nowrap; }
+  .face-result-item .face-badge.matched { background: rgba(76,175,80,0.2); color: #4caf50; }
+  .face-result-item .face-badge.unmatched { background: rgba(244,67,54,0.2); color: #f44336; }
+  .summary-bar { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; padding: 10px 14px; background: #0a1a30; border-radius: 8px; font-size: 0.85em; }
+  .summary-bar .stat { display: flex; align-items: center; gap: 6px; }
+  .summary-bar .stat .num { font-size: 1.2em; font-weight: 700; color: #e94560; }
+  .summary-bar .stat .label { color: #888; }
+
+</style>
+<script src="js/Dexie.js"></script>
+</head>
+<body>
+<div class="container">
+  <h1>ESP32 Camera Face Recognition</h1>
+  <div class="model-select-row">
+    <h3>设置</h3>
+    <div class="inline-row">
+      <label class="model-select-label" for="modelSelect">模型</label>
+      <select id="modelSelect">
+        <option value="full_range" selected>full_range (BlazeFace Full Range ~5m)</option>
+        <option value="short_range">short_range (BlazeFace Short Range ~2m)</option>
+      </select>
+    </div>
+    <div class="inline-row">
+      <label class="model-select-label">Camera URL</label>
+      <input type="text" id="cameraUrl" value="https://esp32s3.local/capture" placeholder="https://esp32s3.local/capture">
+    </div>
+    <div class="threshold-row">
+      <label for="thresholdSlider">置信度</label>
+      <input type="range" id="thresholdSlider" min="0" max="100" value="40" step="1">
+      <span id="thresholdValue">0.40</span>
+    </div>
+    <div class="threshold-row">
+      <label for="ttsSpeedSlider">语音速度</label>
+      <input type="range" id="ttsSpeedSlider" min="5" max="40" value="26" step="1">
+      <span id="ttsSpeedValue">2.6</span>
+    </div>
+  </div>
+  <div class="section">
+    <h3>摄像头输出</h3>
+    <div class="btn-row" style="margin-top:8px;">
+      <button class="btn-primary" id="btnStart" disabled>Start Monitoring</button>
+      <button class="btn-stop" id="btnStop" disabled>Stop Monitoring</button>
+      <div class="voice-indicator" id="voiceIndicator">
+        <div class="voice-wave"><span></span><span></span><span></span><span></span><span></span></div>
+        Speaking...
+      </div>
+      <span id="monitorIndicator" style="font-size:0.85em;color:#888;">
+        <span class="detect-indicator inactive"></span>
+      </span>
+    </div>
+    <div class="info-row" style="margin-top:8px;">
+      <span id="cycleCount">Cycles: 0</span>
+      <span id="matchCount">Matches: 0</span>
+      <span id="faceCount">Faces detected: 0</span>
+    </div>
+    <div class="camera-box" style="margin-top:12px;">
+      <canvas id="cameraCanvas" width="640" height="480"></canvas>
+      <div class="label" id="cameraLabel">Waiting for camera...</div>
+    </div>
+      </div>
+  <!-- Hidden high-resolution canvas for alignment source -->
+  <canvas id="detectCanvas"></canvas>
+
+  <div class="section">
+    <h3>Face Library (JSON InputBox) — Multi-Person Support</h3>
+    <textarea id="galleryInput" placeholder='Paste face library JSON here, e.g.: { "PersonA": [0.01, ...], "PersonB": [0.02, ...] }'>{"葛宁":[],"宝宝":[],"宝宝2":[]}</textarea>
+    <div id="galleryStatus" class="status info" style="margin-top:8px;">Please paste a valid face library JSON (object with name-vector pairs)</div>
+    <div id="libInfo" class="lib-info"></div>
+  </div>
+  <script src="./assets/exifr/full.umd.js"></script>
+<script src="./assets/onnxruntime/ort.all.min.js"></script>
+<script type="module">
+import { FaceDetector, FilesetResolver } from './assets/vision_bundle.mjs?v=0.10.35';
+
+// ============ DOM References ============
+const cameraCanvas = document.getElementById('cameraCanvas');
+const cameraLabel = document.getElementById('cameraLabel');
+const detectCanvas = document.getElementById('detectCanvas');
+const cameraUrlInput = document.getElementById('cameraUrl');
+const cameraStatus = null;
+const galleryInput = document.getElementById('galleryInput');
+const galleryStatus = document.getElementById('galleryStatus');
+const libInfo = document.getElementById('libInfo');
+const btnStart = document.getElementById('btnStart');
+const btnStop = document.getElementById('btnStop');
+const monitorIndicator = document.getElementById('monitorIndicator');
+const voiceIndicator = document.getElementById('voiceIndicator');
+const thresholdSlider = document.getElementById('thresholdSlider');
+const thresholdValue = document.getElementById('thresholdValue');
+const ttsSpeedSlider = document.getElementById('ttsSpeedSlider');
+const ttsSpeedValue = document.getElementById('ttsSpeedValue');
+const cycleCount = document.getElementById('cycleCount');
+const matchCount = document.getElementById('matchCount');
+const faceCount = document.getElementById('faceCount');
+const modelSelect = document.getElementById('modelSelect');
+const modelBadge = null;
+const modelHint = null;
+
+// ============ State ============
+let faceDetector = null;
+let ortSession = null;
+let isNCHW = false;
+let isProcessing = false;
+let isMonitoring = false;
+let monitorTimer = null;
+let totalCycles = 0;
+let totalMatches = 0;
+let faceLib = null;
+let faceLibDim = 0;
+let lastAnnouncedNamesStr = null;
+// ESP32: stores the latest fetched image for redrawing
+let loadedImage = null;
+
+// ============ Model Configuration ============
+const MODEL_CONFIGS = {
+  short_range: {
+    label: 'BlazeFace Short Range',
+    modelPath: './assets/models/blaze_face_short_range.tflite',
+    description: 'Detects faces within ~2m (close-up)',
+    range: '0.5-2m'
+  },
+  full_range: {
+    label: 'BlazeFace Full Range',
+    modelPath: './assets/models/blaze_face_full_range.tflite',
+    description: 'Detects faces within ~5m (mid-range)',
+    range: '0.5-5m'
+  }
+};
+
+let selectedModel = 'full_range';
+
+// ============ Constants ============
+const TEMPLATE_POINTS = [
+  { x: 38.0, y: 51.0 },
+  { x: 74.0, y: 51.0 },
+  { x: 56.0, y: 71.0 }
+];
+const ALIGN_SIZE = 112;
+const DETECT_CONFIDENCE_THRESHOLD = 0.7;
+
+// ============ Utility Functions ============
+
+function setStatus(el, type, msg) {
+  if (!el) { console.log('[status] ' + msg); return; }
+  el.className = 'status ' + type;
+  el.innerHTML = msg;
+}
+
+function showSpinner(el, msg) {
+  if (!el) { console.log('[spinner] ' + msg); return; }
+  el.className = 'status info';
+  el.innerHTML = '<span class="spinner"></span> ' + msg;
+}
+
+function getTimestamp() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return now.getFullYear() + '-' +
+    pad(now.getMonth() + 1) + '-' +
+    pad(now.getDate()) + ' ' +
+    pad(now.getHours()) + ':' +
+    pad(now.getMinutes()) + ':' +
+    pad(now.getSeconds());
+}
+
+function getThreshold() {
+  return parseInt(thresholdSlider.value) / 100;
+}
+
+function getDetectionScore(detection) {
+  if (detection.categories && detection.categories.length > 0) {
+    return detection.categories[0].score;
+  }
+  if (typeof detection.score === 'number') return detection.score;
+  return 0;
+}
+
+function appendLog(message) {
+  console.log(message);
+}
+
+// ============ ESP32 Image Fetching ============
+
+async function loadCameraImage() {
+  const url = cameraUrlInput.value.trim();
+  if (!url) {
+    throw new Error('Camera URL is empty');
+  }
+
+  const cacheBuster = '?t=' + Date.now();
+  const fullUrl = url + cacheBuster;
+  console.log('[cam] Fetching:', fullUrl);
+
+  const response = await fetch(fullUrl);
+
+  if (!response.ok) {
+    throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => { resolve({ img, blobUrl }); };
+    img.onerror = () => { URL.revokeObjectURL(blobUrl); reject(new Error('Failed to decode camera image')); };
+    img.src = blobUrl;
+  });
+}
+
+// ============ Initialization ============
+
+async function initialize() {
+  try {
+    const modelCfg = MODEL_CONFIGS[selectedModel];
+    const modelPath = modelCfg.modelPath;
+
+    console.log('[init] Loading MediaPipe WASM (full_range compatible)...');
+    const vision = await FilesetResolver.forVisionTasks('./assets/wasm_full');
+
+    console.log('[init] Loading FaceDetector model: ' + modelCfg.label + '...');
+    faceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: modelPath },
+      runningMode: 'IMAGE'
+    });
+    console.log('[init] MediaPipe FaceDetector ready (IMAGE mode) | Model: ' + selectedModel + ' | Path: ' + modelPath);
+
+    console.log('[init] Loading ONNX Runtime + MobileFaceNet...');
+    ortSession = await ort.InferenceSession.create('./assets/models/w600k_mbf.onnx', {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all'
+    });
+
+    let modelInputShape = null;
+    let outputDim = 512;
+
+    try {
+      if (ortSession.inputs && ortSession.inputs[0] && ortSession.inputs[0].shape) {
+        modelInputShape = ortSession.inputs[0].shape;
+      }
+    } catch (_) {}
+
+    try {
+      if (ortSession.outputs && ortSession.outputs[0] && ortSession.outputs[0].shape) {
+        const outShape = ortSession.outputs[0].shape;
+        outputDim = outShape[outShape.length - 1];
+      }
+    } catch (_) {}
+
+    if (modelInputShape && modelInputShape.length === 4) {
+      if (modelInputShape[1] === 3) {
+        isNCHW = true;
+        console.log('[init] Detected NCHW [1, 3, 112, 112]');
+      } else if (modelInputShape[3] === 3) {
+        isNCHW = false;
+        console.log('[init] Detected NHWC [1, 112, 112, 3]');
+      } else {
+        console.warn('[init] Unexpected shape:', modelInputShape, '- defaulting NCHW');
+        isNCHW = true;
+      }
+    } else {
+      console.log('[init] Shape metadata unavailable, defaulting NCHW [1, 3, 112, 112]');
+      isNCHW = true;
+    }
+
+    console.log('[init] Model input names:', ortSession.inputNames);
+    console.log('[init] Model output dim:', outputDim);
+
+    console.log('[init] All dependencies loaded | MediaPipe FaceDetector (IMAGE) | ONNX MobileFaceNet | Output: ' + outputDim + ' dims');
+
+    await loadFaceLibraryFromURL();
+
+    btnStart.disabled = false;
+
+  } catch (err) {
+    console.error('[init] Failed:', err);
+  }
+}
+
+// ============ Threshold Slider ============
+
+thresholdSlider.addEventListener('input', () => {
+  const val = parseInt(thresholdSlider.value) / 100;
+  thresholdValue.textContent = val.toFixed(2);
+});
+
+ttsSpeedSlider.addEventListener('input', () => {
+  const val = parseInt(ttsSpeedSlider.value) / 10;
+  ttsSpeedValue.textContent = val.toFixed(1);
+});
+
+function getTtsSpeed() {
+  return parseInt(ttsSpeedSlider.value) / 10;
+}
+
+// ============ Feature Input Validation ============
+
+function parseFaceLibrary() {
+  const raw = galleryInput.value.trim();
+  if (!raw) {
+    setStatus(galleryStatus, 'warn', 'InputBox is empty, please paste face library JSON');
+    libInfo.textContent = '';
+    faceLib = null; faceLibDim = 0;
+    return null;
+  }
+
+  let obj;
+  try { obj = JSON.parse(raw); }
+  catch (e) {
+    setStatus(galleryStatus, 'error', 'JSON parse failed: ' + e.message);
+    libInfo.textContent = '';
+    faceLib = null; faceLibDim = 0;
+    return null;
+  }
+
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    setStatus(galleryStatus, 'error', 'Expected a JSON object, got ' + (Array.isArray(obj) ? 'array' : typeof obj));
+    libInfo.textContent = '';
+    faceLib = null; faceLibDim = 0;
+    return null;
+  }
+
+  const entries = Object.entries(obj);
+  if (entries.length === 0) {
+    setStatus(galleryStatus, 'warn', 'Face library is empty');
+    libInfo.textContent = '';
+    faceLib = []; faceLibDim = 0;
+    return [];
+  }
+
+  const lib = [];
+  let expectedDim = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const [name, vector] = entries[i];
+    if (!Array.isArray(vector)) {
+      setStatus(galleryStatus, 'error', 'Value for "' + name + '" is not an array');
+      libInfo.textContent = ''; faceLib = null; faceLibDim = 0; return null;
+    }
+    if (vector.length === 0) {
+      setStatus(galleryStatus, 'error', 'Vector for "' + name + '" is empty');
+      libInfo.textContent = ''; faceLib = null; faceLibDim = 0; return null;
+    }
+    if (i === 0) expectedDim = vector.length;
+    else if (vector.length !== expectedDim) {
+      setStatus(galleryStatus, 'error', 'Dimension mismatch: "' + name + '" has ' + vector.length + ' dims, expected ' + expectedDim);
+      libInfo.textContent = ''; faceLib = null; faceLibDim = 0; return null;
+    }
+    for (let j = 0; j < vector.length; j++) {
+      if (typeof vector[j] !== 'number' || isNaN(vector[j])) {
+        setStatus(galleryStatus, 'error', 'Non-numeric at index ' + j + ' for "' + name + '"');
+        libInfo.textContent = ''; faceLib = null; faceLibDim = 0; return null;
+      }
+    }
+    let sumSq = 0;
+    for (let k = 0; k < vector.length; k++) sumSq += vector[k] * vector[k];
+    const l2Norm = Math.sqrt(sumSq);
+    if (l2Norm < 1e-8) {
+      setStatus(galleryStatus, 'error', 'Vector for "' + name + '" is all zeros');
+      libInfo.textContent = ''; faceLib = null; faceLibDim = 0; return null;
+    }
+    lib.push({ name, vector: vector.map(v => v / l2Norm) });
+  }
+
+  faceLib = lib; faceLibDim = expectedDim;
+  setStatus(galleryStatus, 'success', 'Face library loaded: ' + lib.length + ' person(s), ' + expectedDim + ' dims each');
+  libInfo.textContent = 'Library entries: ' + lib.map(e => '"' + e.name + '"').join(', ');
+  return lib;
+}
+
+galleryInput.addEventListener('input', () => parseFaceLibrary());
+
+// ============ Load Face Library from URL ============
+
+async function loadFaceLibraryFromURL() {
+  // Try IndexedDB first
+  try {
+    showSpinner(galleryStatus, 'Loading face library from local DB...');
+    var db = new Dexie("face_feature_db");
+    db.version(2).stores({ features: "key" });
+    await db.open();
+    var item = await db.features.get("face_feature");
+    if (item && item.data) {
+      galleryInput.value = JSON.stringify(item.data);
+      parseFaceLibrary();
+      console.log('[load] Face library loaded from IndexedDB:', Object.keys(item.data).length, 'persons');
+      return;
+    }
+  } catch (err) {
+    console.warn('[load] IndexedDB load failed, trying file:', err.message);
+  }
+
+  // Fallback to file
+  const url = './face_feature.json';
+  try {
+    showSpinner(galleryStatus, 'Loading face library from server...');
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+    }
+    const jsonText = await response.text();
+    galleryInput.value = jsonText;
+    parseFaceLibrary();
+    console.log('[load] Face library loaded from URL:', url);
+  } catch (err) {
+    console.warn('[load] Failed to load face library, using default:', err.message);
+    setStatus(galleryStatus, 'warn', 'Failed to load from server: ' + err.message + '. Using local default.');
+    parseFaceLibrary();
+  }
+}
+
+
+// ============ Image Capture from ESP32 ============
+
+async function captureCameraFrame() {
+  const { img, blobUrl } = await loadCameraImage();
+
+  // Store image for redrawing (used by drawAllDetectionsOnCanvas)
+  loadedImage = img;
+
+  const vw = img.width;
+  const vh = img.height;
+
+  if (vw === 0 || vh === 0) {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    throw new Error('Image dimensions are zero');
+  }
+
+  // Draw full-res to detectCanvas for high-quality alignment
+  const CAPTURE_MAX = 1920;
+  let captureW = vw;
+  let captureH = vh;
+  const captureMaxDim = Math.max(captureW, captureH);
+  if (captureMaxDim > CAPTURE_MAX) {
+    const s = CAPTURE_MAX / captureMaxDim;
+    captureW = Math.round(captureW * s);
+    captureH = Math.round(captureH * s);
+  }
+
+  detectCanvas.width = captureW;
+  detectCanvas.height = captureH;
+  const dctx = detectCanvas.getContext('2d');
+  dctx.drawImage(img, 0, 0, captureW, captureH);
+
+  // Draw scaled version to display canvas
+  const DISPLAY_MAX = 640;
+  let displayW = captureW;
+  let displayH = captureH;
+  const displayMaxDim = Math.max(displayW, displayH);
+  if (displayMaxDim > DISPLAY_MAX) {
+    const s = DISPLAY_MAX / displayMaxDim;
+    displayW = Math.round(displayW * s);
+    displayH = Math.round(displayH * s);
+  }
+
+  cameraCanvas.width = displayW;
+  cameraCanvas.height = displayH;
+  const ctx = cameraCanvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, displayW, displayH);
+
+  const scaleRatio = displayW / captureW;
+
+  cameraLabel.textContent = 'ESP32: ' + vw + 'x' + vh +
+    ' | Capture: ' + captureW + 'x' + captureH +
+    ' | Display: ' + displayW + 'x' + displayH;
+
+  // Clean up blob URL after drawing
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+
+  return {
+    width: vw, height: vh,
+    captureW, captureH,
+    displayW, displayH,
+    scaleRatio
+  };
+}
+
+// ============ Face Detection (MediaPipe) ============
+
+async function detectAllFaces(canvas) {
+  if (!faceDetector) {
+    throw new Error('Face detector not initialized');
+  }
+
+  const result = faceDetector.detect(canvas);
+  const detections = result.detections || [];
+  console.log('[detect] Raw detections:', detections.length);
+
+  if (detections.length === 0) {
+    return { faces: [], message: 'No face detected' };
+  }
+
+  const validDetections = detections.filter(d => getDetectionScore(d) > DETECT_CONFIDENCE_THRESHOLD);
+  console.log('[detect] Valid detections (score > ' + DETECT_CONFIDENCE_THRESHOLD + '):', validDetections.length);
+
+  if (validDetections.length === 0) {
+    return { faces: [], message: 'No valid face (all scores <= ' + DETECT_CONFIDENCE_THRESHOLD + ')' };
+  }
+
+  const cw = canvas.width, ch = canvas.height;
+  let faceInfos = [];
+
+  for (const det of validDetections) {
+    const bbox = det.boundingBox;
+    if (!bbox) continue;
+    const kps = det.keypoints || [];
+    if (kps.length < 3) continue;
+
+    const centerX = bbox.originX + bbox.width / 2;
+    const centerY = bbox.originY + bbox.height / 2;
+
+    faceInfos.push({
+      detection: det,
+      bbox,
+      centerX,
+      centerY,
+      keypoints: kps,
+      score: getDetectionScore(det)
+    });
+  }
+
+  if (faceInfos.length === 0) {
+    return { faces: [], message: 'No faces with sufficient keypoints' };
+  }
+
+  // Sort: bottom-to-top (y descending), then left-to-right (x ascending)
+  faceInfos.sort((a, b) => {
+    if (Math.abs(b.centerY - a.centerY) > 10) {
+      return b.centerY - a.centerY;
+    }
+    return a.centerX - b.centerX;
+  });
+
+  faceInfos.forEach((f, i) => { f.index = i + 1; });
+
+  console.log('[detect] Sorted faces (bottom-to-top, left-to-right):',
+    faceInfos.map(f => '#' + f.index + ' score=' + f.score.toFixed(3) +
+      ' center=(' + f.centerX.toFixed(0) + ',' + f.centerY.toFixed(0) + ')'));
+
+  return { faces: faceInfos, message: null };
+}
+
+// ============ Face Alignment ============
+
+function computeSimilarityTransform(srcPoints, dstPoints) {
+  const [sx1, sy1] = [srcPoints[0].x, srcPoints[0].y];
+  const [sx2, sy2] = [srcPoints[1].x, srcPoints[1].y];
+  const [sx3, sy3] = [srcPoints[2].x, srcPoints[2].y];
+
+  const [dx1, dy1] = [dstPoints[0].x, dstPoints[0].y];
+  const [dx2, dy2] = [dstPoints[1].x, dstPoints[1].y];
+  const [dx3, dy3] = [dstPoints[2].x, dstPoints[2].y];
+
+  const srcEyeDist = Math.sqrt((sx2 - sx1) ** 2 + (sy2 - sy1) ** 2);
+  const dstEyeDist = Math.sqrt((dx2 - dx1) ** 2 + (dy2 - dy1) ** 2);
+  const scale = dstEyeDist / srcEyeDist;
+
+  const srcAngle = Math.atan2(sy2 - sy1, sx2 - sx1);
+  const dstAngle = Math.atan2(dy2 - dy1, dx2 - dx1);
+  const theta = dstAngle - srcAngle;
+
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+
+  const nx = scale * (cosT * sx3 - sinT * sy3);
+  const ny = scale * (sinT * sx3 + cosT * sy3);
+  const tx = dx3 - nx;
+  const ty = dy3 - ny;
+
+  console.log('[transform] scale:', scale.toFixed(4),
+    'theta:', (theta * 180 / Math.PI).toFixed(2) + 'deg',
+    'tx:', tx.toFixed(2), 'ty:', ty.toFixed(2));
+
+  return { scale, cosT, sinT, tx, ty };
+}
+
+function replicateBorder(ctx) {
+  const imgData = ctx.getImageData(0, 0, ALIGN_SIZE, ALIGN_SIZE);
+  const d = imgData.data;
+  const W = ALIGN_SIZE, H = ALIGN_SIZE;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      if (d[idx + 3] === 0) {
+        let found = false;
+        for (let r = 1; r < Math.max(W, H) && !found; r++) {
+          for (let dy = -r; dy <= r && !found; dy++) {
+            for (let dx = -r; dx <= r && !found; dx++) {
+              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+              const nx = x + dx, ny = y + dy;
+              if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+              const nidx = (ny * W + nx) * 4;
+              if (d[nidx + 3] > 0) {
+                d[idx]     = d[nidx];
+                d[idx + 1] = d[nidx + 1];
+                d[idx + 2] = d[nidx + 2];
+                d[idx + 3] = 255;
+                found = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function alignFace(keypoints, sourceCanvas) {
+  const imgW = sourceCanvas.width;
+  const imgH = sourceCanvas.height;
+  const srcPoints = [
+    { x: keypoints[0].x * imgW, y: keypoints[0].y * imgH },
+    { x: keypoints[1].x * imgW, y: keypoints[1].y * imgH },
+    { x: keypoints[2].x * imgW, y: keypoints[2].y * imgH }
+  ];
+
+  console.log('[align] Keypoints (pixels): LEye:', srcPoints[0], 'REye:', srcPoints[1], 'Nose:', srcPoints[2]);
+
+  const M = computeSimilarityTransform(srcPoints, TEMPLATE_POINTS);
+  const { scale, cosT, sinT, tx, ty } = M;
+
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = ALIGN_SIZE;
+  offCanvas.height = ALIGN_SIZE;
+  const offCtx = offCanvas.getContext('2d');
+
+  offCtx.save();
+  offCtx.setTransform(
+    scale * cosT,  scale * sinT,
+    -scale * sinT, scale * cosT,
+    tx, ty
+  );
+  offCtx.imageSmoothingEnabled = true;
+  offCtx.imageSmoothingQuality = 'medium';
+  offCtx.drawImage(sourceCanvas, 0, 0);
+  offCtx.restore();
+
+  replicateBorder(offCtx);
+
+  const alignedImageData = offCtx.getImageData(0, 0, ALIGN_SIZE, ALIGN_SIZE);
+  return new Uint8ClampedArray(alignedImageData.data);
+}
+
+// ============ Feature Extraction ============
+
+async function extractFeature(alignedPixels) {
+  if (!ortSession) {
+    throw new Error('ONNX session not initialized');
+  }
+
+  const rgb = new Float32Array(ALIGN_SIZE * ALIGN_SIZE * 3);
+
+  for (let i = 0; i < ALIGN_SIZE * ALIGN_SIZE; i++) {
+    rgb[i * 3]     = (alignedPixels[i * 4]     / 255.0 - 0.5) * 2;
+    rgb[i * 3 + 1] = (alignedPixels[i * 4 + 1] / 255.0 - 0.5) * 2;
+    rgb[i * 3 + 2] = (alignedPixels[i * 4 + 2] / 255.0 - 0.5) * 2;
+  }
+
+  let tensorData, tensorShape;
+
+  if (isNCHW) {
+    tensorShape = [1, 3, ALIGN_SIZE, ALIGN_SIZE];
+    tensorData = new Float32Array(3 * ALIGN_SIZE * ALIGN_SIZE);
+    for (let i = 0; i < ALIGN_SIZE * ALIGN_SIZE; i++) {
+      tensorData[i]                           = rgb[i * 3];
+      tensorData[ALIGN_SIZE * ALIGN_SIZE + i]       = rgb[i * 3 + 1];
+      tensorData[2 * ALIGN_SIZE * ALIGN_SIZE + i]   = rgb[i * 3 + 2];
+    }
+  } else {
+    tensorShape = [1, ALIGN_SIZE, ALIGN_SIZE, 3];
+    tensorData = rgb;
+  }
+
+  console.log('[extract] Tensor shape:', tensorShape, 'NCHW:', isNCHW);
+
+  const inputName = ortSession.inputNames[0];
+  const outputName = ortSession.outputNames[0];
+  const inputTensor = new ort.Tensor('float32', tensorData, tensorShape);
+
+  const feeds = {};
+  feeds[inputName] = inputTensor;
+
+  const results = await ortSession.run(feeds);
+  const outputTensor = results[outputName];
+  const rawVector = Array.from(outputTensor.data);
+
+  console.log('[extract] Raw output length:', rawVector.length);
+
+  let sumSq = 0;
+  for (let i = 0; i < rawVector.length; i++) {
+    sumSq += rawVector[i] * rawVector[i];
+  }
+  const l2Norm = Math.sqrt(sumSq);
+
+  if (l2Norm < 1e-8) {
+    throw new Error('Inference anomaly: feature vector is all zeros');
+  }
+
+  console.log('[extract] L2 norm:', l2Norm.toFixed(6));
+
+  const normalizedVec = rawVector.map(v => v / l2Norm);
+
+  let checkSumSq = 0;
+  for (let i = 0; i < normalizedVec.length; i++) {
+    checkSumSq += normalizedVec[i] * normalizedVec[i];
+  }
+  console.log('[extract] Normalized L2 norm:', Math.sqrt(checkSumSq).toFixed(8));
+
+  return normalizedVec;
+}
+
+
+// ============ TTS Voice ============
+
+function speak(text) {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) {
+      console.log('[tts] SpeechSynthesis not supported');
+      resolve();
+      return;
+    }
+
+    // IMPORTANT: Do NOT call cancel() here — it breaks the iOS speech session.
+    // Only cancel when the user explicitly stops monitoring.
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = getTtsSpeed();
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+
+    utterance.onend = finish;
+    utterance.onerror = (e) => {
+      console.log('[tts] Speak error:', e.error || 'unknown');
+      finish();
+    };
+
+    // iOS may need resume (some WebKit versions pause the queue)
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
+    window.speechSynthesis.speak(utterance);
+
+    // Fallback timeout: Chrome/iOS may not fire onend for short utterances
+    setTimeout(finish, 5000);
+  });
+}
+
+let speechLoopActive = false;
+let latestMatchedNames = null;  // Shared state: set by processOneCycle, consumed by scheduleNextSpeech
+
+function speakSilence() {
+  return speak('');
+}
+
+function scheduleNextSpeech() {
+  if (!speechLoopActive) return;
+
+  const names = latestMatchedNames;
+  const currentNamesStr = (names && names.length > 0) ? names.slice().sort().join(',') : '';
+
+  if (currentNamesStr && currentNamesStr !== lastAnnouncedNamesStr) {
+    // New names to announce
+    lastAnnouncedNamesStr = currentNamesStr;
+    const text = names.join('，');
+    console.log('[tts] Speaking:', text);
+    voiceIndicator.classList.add('active');
+    speak(text).then(() => {
+      voiceIndicator.classList.remove('active');
+      // Chain next utterance — onend chaining is reliable on iOS
+      setTimeout(scheduleNextSpeech, 2000);
+    });
+  } else {
+    // No new names — play silence to keep iOS speech session alive
+    console.log('[tts] No new names, playing silence');
+    speakSilence().then(() => {
+      setTimeout(scheduleNextSpeech, 2000);
+    });
+  }
+}
+
+
+// ============ Drawing ============
+
+function drawAllDetectionsOnCanvas(canvas, faceInfos) {
+  const ctx = canvas.getContext('2d');
+  // Redraw the loaded image first (ESP32: use loadedImage instead of videoElement)
+  if (loadedImage) {
+    ctx.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
+  }
+
+  const colors = ['#e94560', '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff',
+                  '#9b59b6', '#1abc9c', '#e67e22', '#2ecc71', '#3498db'];
+
+  for (const face of faceInfos) {
+    const bbox = face.bbox;
+    const color = colors[(face.index - 1) % colors.length];
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(bbox.originX, bbox.originY, bbox.width, bbox.height);
+
+    ctx.fillStyle = color;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('#' + face.index + ' ' + (face.score * 100).toFixed(0) + '%',
+      bbox.originX, bbox.originY - 6);
+
+    const kps = face.keypoints || [];
+    const kpColors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff'];
+    const kpLabels = ['R-Eye', 'L-Eye', 'Nose', 'Mouth', 'L-Ear', 'R-Ear'];
+    const cw = canvas.width, ch = canvas.height;
+
+    for (let i = 0; i < kps.length; i++) {
+      const kp = kps[i];
+      const px = kp.x * cw, py = kp.y * ch;
+      ctx.fillStyle = kpColors[i] || '#fff';
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      if (i < 3) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px monospace';
+        ctx.fillText(kpLabels[i] || i, px + 6, py - 6);
+      }
+    }
+  }
+}
+
+function displayResults(faceResults, threshold, totalDetected, matchedCount) {
+  // Results output to web console only
+}
+
+// ============ Main Processing Cycle ============
+
+async function processOneCycle() {
+  if (isProcessing) {
+    console.log('[cycle] Skipping - previous cycle still running');
+    return;
+  }
+
+  isProcessing = true;
+  totalCycles++;
+  cycleCount.textContent = 'Cycles: ' + totalCycles;
+
+  try {
+    const lib = parseFaceLibrary();
+    if (!lib || lib.length === 0) {
+      appendLog(getTimestamp() + ' No target (face library invalid or empty)');
+      displayResults([], getThreshold(), 0, 0);
+      return;
+    }
+
+    setStatus(cameraStatus, 'info', 'Fetching image from ESP32 camera...');
+    const { width: vw, height: vh, captureW, captureH, displayW, displayH, scaleRatio } = await captureCameraFrame();
+
+    setStatus(cameraStatus, 'success', 'Frame captured: ' + vw + 'x' + vh +
+      ' | Capture: ' + captureW + 'x' + captureH);
+
+    showSpinner(cameraStatus, 'Running face detection...');
+    const { faces: detectedFaces, message } = await detectAllFaces(cameraCanvas);
+
+    if (!detectedFaces || detectedFaces.length === 0) {
+      setStatus(cameraStatus, 'warn', message || 'No target');
+      appendLog(getTimestamp() + ' No target');
+      faceCount.textContent = 'Faces detected: 0';
+      lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
+      displayResults([], getThreshold(), 0, 0);
+      return;
+    }
+
+    const totalDetected = detectedFaces.length;
+    faceCount.textContent = 'Faces detected: ' + totalDetected;
+
+    // Draw all detections on display canvas
+    drawAllDetectionsOnCanvas(cameraCanvas, detectedFaces);
+
+    const threshold = getThreshold();
+    const faceResults = [];
+    const matchedNames = [];
+    let matchedCount = 0;
+
+    // Process each face in sorted order: left-to-right, bottom-to-top
+    for (let fi = 0; fi < detectedFaces.length; fi++) {
+      const face = detectedFaces[fi];
+
+      showSpinner(cameraStatus, 'Processing face #' + face.index + '/' + totalDetected + '...');
+
+      const keypoints = face.keypoints || [];
+      if (keypoints.length < 3) {
+        faceResults.push({
+          faceIndex: face.index,
+          error: 'Insufficient keypoints',
+          matchedName: null,
+          similarityPercent: '0.0',
+          faceWidthPx: 0,
+          centerInfo: null
+        });
+        continue;
+      }
+
+      try {
+        // Align face using high-resolution detectCanvas
+        const alignedPixels = alignFace(keypoints, detectCanvas);
+
+        // Extract feature vector
+        const queryVec = await extractFeature(alignedPixels);
+
+        // Dimension check
+        if (queryVec.length !== faceLibDim) {
+          faceResults.push({
+            faceIndex: face.index,
+            error: 'Dim mismatch: ' + queryVec.length + ' vs ' + faceLibDim,
+            matchedName: null,
+            similarityPercent: '0.0',
+            faceWidthPx: Math.round(face.bbox.width),
+            centerInfo: face.centerX.toFixed(0) + ',' + face.centerY.toFixed(0)
+          });
+          continue;
+        }
+
+        // Match against ALL entries in face library — find best match
+        let matchedName = null;
+        let bestSimilarity = -Infinity;
+
+        for (let li = 0; li < faceLib.length; li++) {
+          const entry = faceLib[li];
+          let dotProduct = 0;
+          for (let j = 0; j < queryVec.length; j++) {
+            dotProduct += queryVec[j] * entry.vector[j];
+          }
+
+          if (dotProduct > bestSimilarity) {
+            bestSimilarity = dotProduct;
+            if (dotProduct >= threshold) {
+              matchedName = entry.name;
+            }
+          }
+        }
+
+        const similarityPercent = (bestSimilarity * 100).toFixed(1);
+        const faceWidthPx = Math.round(face.bbox.width);
+        const centerInfo = face.centerX.toFixed(0) + ',' + face.centerY.toFixed(0);
+
+        if (matchedName) {
+          matchedCount++;
+          matchedNames.push(matchedName);
+        }
+
+        faceResults.push({
+          faceIndex: face.index,
+          matchedName,
+          similarityPercent,
+          faceWidthPx,
+          centerInfo,
+          error: null
+        });
+
+        console.log('[cycle] Face #' + face.index + ': ' +
+          (matchedName ? ('MATCH -> ' + matchedName + ' @ ' + similarityPercent + '%') :
+           ('No match, best: ' + similarityPercent + '% < ' + threshold.toFixed(2))));
+
+      } catch (err) {
+        console.error('[cycle] Face #' + face.index + ' error:', err);
+        faceResults.push({
+          faceIndex: face.index,
+          error: err.message,
+          matchedName: null,
+          similarityPercent: '0.0',
+          faceWidthPx: Math.round(face.bbox.width),
+          centerInfo: face.centerX.toFixed(0) + ',' + face.centerY.toFixed(0)
+        });
+      }
+    }
+
+    // Update match counter
+    if (matchedCount > 0) {
+      totalMatches += matchedCount;
+      matchCount.textContent = 'Matches: ' + totalMatches;
+    }
+
+    // Log results
+    if (matchedCount > 0) {
+      appendLog(getTimestamp() + ' Matched ' + matchedCount + '/' + totalDetected + ' faces: ' + matchedNames.join(', '));
+      setStatus(cameraStatus, 'success',
+        'Matched ' + matchedCount + '/' + totalDetected + ' faces | Threshold: ' + threshold.toFixed(2));
+    } else {
+      appendLog(getTimestamp() + ' No match (' + totalDetected + ' faces detected)');
+      setStatus(cameraStatus, 'warn',
+        'No match | ' + totalDetected + ' face(s) detected | Threshold: ' + threshold.toFixed(2));
+      lastAnnouncedNamesStr = null;
+      latestMatchedNames = null;
+    }
+
+    // Display results in UI
+    displayResults(faceResults, threshold, totalDetected, matchedCount);
+
+    // Store latest matched names for the speech loop (runs every 2s independently)
+    // Reset lastAnnouncedNamesStr so names are re-announced on every detection cycle
+    lastAnnouncedNamesStr = null;
+    latestMatchedNames = matchedNames.length > 0 ? matchedNames : null;
+
+  } catch (err) {
+    console.error('[cycle] Error:', err);
+    setStatus(cameraStatus, 'error', 'Error: ' + err.message);
+    appendLog(getTimestamp() + ' No target');
+    displayResults([], getThreshold(), 0, 0);
+  } finally {
+    isProcessing = false;
+  }
+}
+
+// ============ Monitoring Control ============
+
+async function startMonitoring() {
+  if (isMonitoring) return;
+
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      var prime = new SpeechSynthesisUtterance('');
+      prime.volume = 0.5;
+      prime.rate = 2;
+      prime.onend = function() {
+        // Now the iOS speech session is active; start the real loop
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      prime.onerror = function() {
+        // Even if priming fails, try the loop anyway
+        speechLoopActive = true;
+        scheduleNextSpeech();
+      };
+      window.speechSynthesis.speak(prime);
+    } else {
+      speechLoopActive = true;
+      scheduleNextSpeech();
+    }
+
+
+  const lib = parseFaceLibrary();
+  if (!lib || lib.length === 0) {
+    setStatus(cameraStatus, 'error', 'Please provide a valid face library JSON with at least one person');
+    return;
+  }
+
+  const url = cameraUrlInput.value.trim();
+  if (!url) {
+    setStatus(cameraStatus, 'error', 'Please enter a camera URL');
+    return;
+  }
+
+  // ESP32: no camera stream to open - just start the monitoring loop
+  isMonitoring = true;
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  galleryInput.disabled = true;
+  cameraUrlInput.disabled = true;
+  lastAnnouncedNamesStr = null;
+
+  monitorIndicator.innerHTML = '<span class="detect-indicator active"></span> Monitoring...';
+  setStatus(cameraStatus, 'info', 'Monitoring started - checking every 1 second');
+
+  appendLog('========== Monitoring Start ' + getTimestamp() + ' ==========');
+
+  processOneCycle();
+
+  monitorTimer = setInterval(() => {
+    if (isMonitoring) {
+      processOneCycle();
+    }
+  }, 1000);
+}
+
+function stopMonitoring() {
+  if (!isMonitoring) return;
+
+  isMonitoring = false;
+  speechLoopActive = false;
+
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+
+  if (monitorTimer) {
+    clearInterval(monitorTimer);
+    monitorTimer = null;
+  }
+
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  galleryInput.disabled = false;
+  cameraUrlInput.disabled = false;
+  lastAnnouncedNamesStr = null;
+
+  monitorIndicator.innerHTML = '<span class="detect-indicator inactive"></span> Stopped';
+  setStatus(cameraStatus, 'info', 'Monitoring stopped');
+
+  appendLog('========== Monitoring Stop ' + getTimestamp() + ' ==========');
+}
+
+btnStart.addEventListener('click', startMonitoring);
+btnStop.addEventListener('click', stopMonitoring);
+
+// ============ Model Selection ============
+function updateModelUI() {
+  const cfg = MODEL_CONFIGS[selectedModel];
+  console.log('[model] Switched to: ' + selectedModel + ' (' + cfg.label + ') | ' + cfg.description + ' | Range: ' + cfg.range);
+}
+
+modelSelect.addEventListener('change', async () => {
+  const newModel = modelSelect.value;
+  if (newModel === selectedModel) return;
+
+  // Stop monitoring if active
+  if (isMonitoring) {
+    stopMonitoring();
+  }
+
+  selectedModel = newModel;
+  updateModelUI();
+
+  // Re-initialize face detector with new model
+  try {
+    console.log('[model] Switching model to ' + MODEL_CONFIGS[selectedModel].label + '...');
+    btnStart.disabled = true;
+
+    const modelCfg = MODEL_CONFIGS[selectedModel];
+    const modelPath = modelCfg.modelPath;
+
+    const vision = await FilesetResolver.forVisionTasks('./assets/wasm_full');
+    faceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: modelPath },
+      runningMode: 'IMAGE'
+    });
+    console.log('[model] FaceDetector recreated with model: ' + selectedModel + ' | WASM: wasm_full');
+
+    console.log('[model] Switched to ' + modelCfg.label + ' | ' + modelCfg.description);
+
+    // Re-validate face library compatibility
+    const lib = parseFaceLibrary();
+    if (lib && lib.length > 0) {
+      btnStart.disabled = false;
+    } else {
+      btnStart.disabled = true;
+    }
+
+  } catch (err) {
+    console.error('[model] Failed to switch model:', err);
+    btnStart.disabled = true;
+  }
+});
+
+// Initialize model UI
+updateModelUI();
+
+initialize();
+console.log('[main] seekesp_fullrange_ttsmn2.html loaded');
+</script>
+
+</body>
+</html>

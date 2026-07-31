@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人脸库管理</title>
+    <link rel="stylesheet" href="js/tabulator.min.css">
+    <script src="js/Dexie.js"></script>
+    <script src="js/tabulator.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px 8px 0 0;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        #face-table { min-height: 350px; }
+        .add-form {
+            padding: 14px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            border-bottom: 1px solid #e0e0e0;
+            flex-wrap: wrap;
+        }
+        .add-form label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+        .add-form input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        .add-form input:focus { border-color: #667eea; }
+        .add-form input[name="addName"] { width: 130px; }
+        .add-form input[name="addVector"] { flex: 1; min-width: 280px; }
+        .add-form button {
+            padding: 8px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: transform 0.2s;
+        }
+        .add-form button:hover { transform: translateY(-1px); }
+        .toolbar {
+            padding: 10px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .toolbar button {
+            padding: 8px 20px;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .toolbar button:hover { transform: translateY(-1px); }
+        .btn-refresh { background: #6c757d; }
+        .btn-save { background: #28a745; }
+        .btn-save.saved { background: #6c757d; }
+        .status { margin-left: auto; font-size: 13px; color: #666; }
+        .status.dirty { color: #e67e22; font-weight: 600; }
+        .row-del-btn {
+            padding: 4px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .row-del-btn:hover { background: #c82333; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #28a745; }
+        .toast.error { background: #dc3545; }
+    </style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="container">
+    <div class="header">人脸特征库管理</div>
+    <div class="add-form">
+        <div>
+            <label>姓名</label>
+            <input type="text" name="addName" id="addName" placeholder="张三">
+        </div>
+        <div style="flex:1;min-width:280px;">
+            <label>特征向量 (JSON数组)</label>
+            <input type="text" name="addVector" id="addVector" placeholder="[0.01, -0.02, 0.03, ...]">
+        </div>
+        <button onclick="addRecord()">新 增</button>
+    </div>
+    <div class="toolbar">
+        <button class="btn-refresh" onclick="refreshTable()">刷 新</button>
+        <button class="btn-save" id="btnSave" onclick="saveToDB()">保存到本地</button>
+        <span class="status" id="status">加载中...</span>
+    </div>
+    <div id="face-table"></div>
+</div>
+<script>
+var table;
+var dirty = false;
+var origFaceLib = {};
+
+function showToast(msg, type) {
+    type = type || "success";
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast " + type + " show";
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.className = "toast"; }, 2000);
+}
+
+function setStatus(msg, isDirty) {
+    var s = document.getElementById("status");
+    s.textContent = msg;
+    if (isDirty) { s.classList.add("dirty"); }
+    else { s.classList.remove("dirty"); }
+}
+
+function markDirty() {
+    dirty = true;
+    setStatus("有未保存的修改", true);
+}
+
+function tryParseVector(str) {
+    try {
+        var arr = JSON.parse(str);
+        return Array.isArray(arr) ? arr : null;
+    } catch (e) { return null; }
+}
+
+table = new Tabulator("#face-table", {
+    layout: "fitColumns",
+    pagination: true,
+    paginationSize: 20,
+    placeholder: "暂无数据，请先添加",
+    columns: [
+        { title: "序号", formatter: "rownum", width: 60, hozAlign: "center", headerSort: false },
+        {
+            title: "姓名", field: "name", sorter: "string", headerFilter: "input",
+            editor: "input",
+            cellEdited: function (cell) { markDirty(); }
+        },
+        {
+            title: "维度", field: "dim", width: 70, hozAlign: "center", sorter: "number",
+            editor: false
+        },
+        {
+            title: "特征向量(前5项预览)", field: "preview", width: 280,
+            editor: false
+        },
+        {
+            title: "特征向量(完整JSON)", field: "full", width: 350,
+            editor: "input",
+            cellEdited: function (cell) {
+                var row = cell.getRow();
+                var data = row.getData();
+                var vec = tryParseVector(data.full);
+                if (vec) {
+                    row.update({
+                        dim: vec.length,
+                        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "")
+                    });
+                }
+                markDirty();
+            }
+        },
+        {
+            title: "操作", field: "actions", width: 80, hozAlign: "center",
+            headerSort: false,
+            formatter: function (cell) {
+                return '<button class="row-del-btn">删除</button>';
+            },
+            cellClick: function (e, cell) {
+                var row = cell.getRow();
+                var name = row.getData().name;
+                if (confirm('确定删除 "' + name + '" 吗？')) {
+                    row.delete();
+                    markDirty();
+                    showToast('已删除 "' + name + '"');
+                }
+            }
+        }
+    ],
+    rowClick: function (e, row) {
+        if (e.target.classList.contains("row-del-btn")) return;
+        var data = row.getData();
+        navigator.clipboard.writeText(data.full).then(function () {
+            showToast("已复制 " + data.name + " 的特征向量");
+        });
+    }
+});
+
+var db = new Dexie("face_feature_db");
+db.version(2).stores({ features: "key" });
+
+function loadTable() {
+    setStatus("加载中...");
+    db.open().then(function () {
+        return db.features.get("face_feature");
+    }).then(function (item) {
+        if (item && item.data) {
+            origFaceLib = item.data;
+            populateTable(origFaceLib);
+            var count = Object.keys(origFaceLib).length;
+            dirty = false;
+            setStatus("共 " + count + " 条记录");
+        } else {
+            origFaceLib = {};
+            table.setData([]);
+            dirty = false;
+            setStatus("数据库为空");
+        }
+    }).catch(function (err) {
+        console.error(err);
+        table.setData([]);
+        setStatus("加载失败: " + err.message);
+    });
+}
+
+function populateTable(faceLib) {
+    var rows = [];
+    Object.keys(faceLib).forEach(function (name) {
+        var vec = faceLib[name];
+        var dim = Array.isArray(vec) ? vec.length : 0;
+        var preview = Array.isArray(vec) ? JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "") : "";
+        rows.push({
+            name: name,
+            dim: dim,
+            preview: preview,
+            full: JSON.stringify(vec)
+        });
+    });
+    table.setData(rows);
+}
+
+function buildFaceLib() {
+    var rows = table.getData();
+    var lib = {};
+    rows.forEach(function (row) {
+        var vec = tryParseVector(row.full);
+        if (vec !== null) {
+            lib[row.name] = vec;
+        }
+    });
+    return lib;
+}
+
+function addRecord() {
+    var name = document.getElementById("addName").value.trim();
+    var vecStr = document.getElementById("addVector").value.trim();
+    if (!name) { showToast("请输入姓名", "error"); return; }
+    if (!vecStr) { showToast("请输入特征向量", "error"); return; }
+    var vec = tryParseVector(vecStr);
+    if (!vec) { showToast("特征向量不是合法的 JSON 数组", "error"); return; }
+    var rows = table.getData();
+    var existing = rows.filter(function (r) { return r.name === name; });
+    if (existing.length > 0) {
+        if (!confirm('已存在名为 "' + name + '" 的记录，是否覆盖？')) return;
+        table.getRows().forEach(function (row) {
+            if (row.getData().name === name) row.delete();
+        });
+    }
+    table.addRow({
+        name: name,
+        dim: vec.length,
+        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : ""),
+        full: JSON.stringify(vec)
+    });
+    document.getElementById("addName").value = "";
+    document.getElementById("addVector").value = "";
+    markDirty();
+    showToast('已添加 "' + name + '"（' + vec.length + ' 维）');
+    document.getElementById("addName").focus();
+}
+
+async function saveToDB() {
+    var btnSave = document.getElementById("btnSave");
+    try {
+        var faceLib = buildFaceLib();
+        await db.open();
+        await db.features.put({ key: "face_feature", data: faceLib });
+        origFaceLib = faceLib;
+        dirty = false;
+        btnSave.textContent = "已保存";
+        btnSave.classList.add("saved");
+        setStatus("共 " + Object.keys(faceLib).length + " 条记录");
+        showToast("已保存到本地数据库");
+        setTimeout(function () {
+            btnSave.textContent = "保存到本地";
+            btnSave.classList.remove("saved");
+        }, 2000);
+    } catch (e) {
+        showToast("保存失败: " + e.message, "error");
+    }
+}
+
+function refreshTable() {
+    if (dirty) {
+        if (!confirm("有未保存的修改，刷新将丢失这些修改，是否继续？")) return;
+    }
+    loadTable();
+}
+
+document.getElementById("addName").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        document.getElementById("addVector").focus();
+    }
+});
+document.getElementById("addVector").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        addRecord();
+    }
+});
+
+loadTable();
+</script>
+
+</body>
+</html>

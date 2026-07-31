@@ -1,0 +1,875 @@
+<!-- Copyright 2023 The MediaPipe Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License. -->
+
+<!--
+============================================================
+  MediaPipe 人脸检测 - 本地部署说明
+============================================================
+
+  方案 1：使用国内 CDN（推荐，无需下载）
+    - 已有配置，USE_DOMESTIC_CDN = true
+    - 使用 jsdelivr 国内镜像，大陆访问更快
+
+  方案 2：完全本地化（需要下载文件）
+    1. 创建目录结构：
+       assets/
+         models/
+         wasm/
+
+    2. 下载以下文件：
+
+    === 模型文件 ===
+    URL: https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+    保存到: assets/models/blaze_face_short_range.tflite
+
+    === MediaPipe 库文件 ===
+    从 https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/ 下载：
+    - vision_bundle.js -> assets/
+    - wasm/* -> assets/wasm/
+
+    3. 修改配置：
+       将 USE_LOCAL_FILES 改为 true
+
+============================================================
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Face detection using the MediaPipe Face Detector task</title>
+  <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+  <style>
+    body {
+      font-family: roboto;
+      margin: 2em;
+    }
+
+    .button-container {
+      display: flex;
+      flex-direction: column;
+      width: 20%;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      padding: 1em;
+      width: 45%;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: row;
+      width: 100%;
+    }
+
+    .videoView {
+      position: relative;
+    }
+
+    .videoView video {
+      display: block;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: auto;
+      width: 100%;
+    }
+
+    video {
+      height: auto;
+      width: 100%;
+    }
+
+    .detectOnClick {
+      position: relative;
+    }
+
+    .detectOnClick > img {
+      width: 100%;
+      cursor: pointer;
+      display: block;
+    }
+
+    .liveView {
+      position: relative;
+      float: left;
+      width: calc(100% - 20px);
+      margin: 10px;
+      cursor: pointer;
+    }
+
+    #demos {
+      opacity: 1;
+    }
+
+    .highlighter {
+      background: transparent;
+      border: 3px solid red;
+      z-index: 1;
+      position: absolute;
+    }
+
+    .className {
+      color: white;
+      font-size: 18px;
+      position: absolute;
+      z-index: 2;
+      margin: 0;
+      background: rgba(0, 0, 0, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <section id="demos" class="invisible">
+
+    <div class="detectOnClick">
+      <img src="" width="100%" id="firstImage" title="Click to get classification!" style="min-height: 200px; background-color: #f0f0f0;" />
+    </div>
+    <div class="detectOnClick">
+      <img src="" width="100%" id="secondImage" title="Click to get classification!" style="min-height: 200px; background-color: #f0f0f0;" />
+    </div>
+
+    <div id="liveView" class="videoView">
+      <div style="margin-bottom: 10px;">
+        <label for="cameraSelect">选择摄像头: </label>
+        <select id="cameraSelect" style="padding: 8px; font-size: 14px; min-width: 200px; margin-right: 10px;">
+          <option value="">加载中...</option>
+        </select>
+      </div>
+      <div style="margin-bottom: 10px;">
+        <button id="webcamButton" class="mdc-button mdc-button--raised" style="margin-right: 10px;">
+          <span class="mdc-button__ripple"></span>
+          <span class="mdc-button__label">ENABLE WEBCAM</span>
+        </button>
+        <button id="shotButton" class="mdc-button mdc-button--raised" style="background-color: #4CAF50; margin-right: 10px;">
+          <span class="mdc-button__ripple"></span>
+          <span class="mdc-button__label">Shot</span>
+        </button>
+        <button id="zoomButton" class="mdc-button mdc-button--raised" style="background-color: #2196F3;">
+          <span class="mdc-button__ripple"></span>
+          <span class="mdc-button__label">Zoom</span>
+        </button>
+      </div>
+      <video id="webcam" autoplay playsinline></video>
+    </div>
+  </section>
+
+  <script type="module">
+    // =====================================================
+    // 完全本地化配置 - 所有文件都在本地！
+    // =====================================================
+    const USE_ALL_LOCAL = true; // 设置为 true 完全本地化
+
+    // 路径配置 - 全部使用本地路径
+    const WASM_PATH = "./assets/wasm";
+    const MODEL_PATH = "./assets/models/blaze_face_short_range.tflite";
+
+    // 导入 MediaPipe 库 - 使用国内 jsdelivr CDN（体积小，速度快，大陆可访问）
+    import { FilesetResolver, FaceDetector } from "https://cdn.jsdelivr.net.cn/npm/@mediapipe/tasks-vision@0.10.17/+esm";
+
+    let faceDetector;
+    let enableWebcamButton;
+    let webcamRunning = false;
+    let faceDetectorReady = false;
+    let cameraSelect;
+    let currentStream = null;
+    let shotButton;
+    let zoomButton;
+    let secondImageContainer;
+    let lastDetectionResult = null; // 保存最近的人脸检测结果
+    let firstImage; // 第一个图片元素
+    let secondImage; // 第二个图片元素
+    let allDetections = []; // 保存所有检测到的人脸信息，带索引
+
+    // Before we can use the detector, we must wait for it to finish
+    // loading. Machine Learning models can be large and take a moment to
+    // get everything needed to run.
+    document.addEventListener("DOMContentLoaded", async () => {
+      console.log('Loading MediaPipe...');
+      console.log('WASM path:', WASM_PATH);
+      console.log('Model path:', MODEL_PATH);
+
+      const vision = await FilesetResolver.forVisionTasks(WASM_PATH);
+      faceDetector = await FaceDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: MODEL_PATH,
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE"
+      });
+      faceDetectorReady = true;
+
+      // Set up event listeners only after everything is ready
+      setupEventListeners();
+    });
+
+    // 获取所有可用的摄像头设备
+    async function getCameraList() {
+      try {
+        // 先请求一次权限，这样才能获取设备标签
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        // 停止这个临时流
+        stream.getTracks().forEach(track => track.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+        // 清空并填充下拉列表
+        cameraSelect.innerHTML = '';
+        videoDevices.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `摄像头 ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+
+        if (videoDevices.length === 0) {
+          const option = document.createElement('option');
+          option.textContent = '未找到摄像头';
+          cameraSelect.appendChild(option);
+        }
+
+        console.log('可用摄像头:', videoDevices);
+      } catch (err) {
+        console.error('获取摄像头列表失败:', err);
+        cameraSelect.innerHTML = '<option value="">无法获取摄像头列表</option>';
+      }
+    }
+
+    function setupEventListeners() {
+      const imageContainers = document.getElementsByClassName('detectOnClick');
+
+      // 初始化图片元素引用
+      firstImage = document.getElementById('firstImage');
+      secondImage = document.getElementById('secondImage');
+
+      // 给图片添加点击事件
+      for (let i = 0; i < imageContainers.length; i++) {
+        imageContainers[i].children[0].addEventListener('click', handleClick);
+      }
+
+      // 获取第二个图片容器
+      secondImageContainer = imageContainers[1];
+      console.log('第二个图片容器:', secondImageContainer);
+
+      if (hasGetUserMedia()) {
+        enableWebcamButton = document.getElementById('webcamButton');
+        cameraSelect = document.getElementById('cameraSelect');
+        shotButton = document.getElementById('shotButton');
+        zoomButton = document.getElementById('zoomButton');
+
+        enableWebcamButton.addEventListener('click', enableCam);
+        cameraSelect.addEventListener('change', handleCameraChange);
+        shotButton.addEventListener('click', handleShot);
+        zoomButton.addEventListener('click', handleZoom);
+
+        // 页面加载时获取摄像头列表
+        getCameraList();
+      } else {
+        console.warn('getUserMedia() is not supported by your browser');
+      }
+    }
+
+    // 处理 Shot 按钮点击
+    function handleShot() {
+      if (!webcamRunning) {
+        alert('请先启用摄像头！');
+        return;
+      }
+
+      if (!faceDetectorReady) {
+        alert('请等待检测器加载完成！');
+        return;
+      }
+
+      console.log('Shot 按钮被点击');
+
+      // 1. 获取第二个图片元素
+      const containers = document.getElementsByClassName('detectOnClick');
+      const targetContainer = containers[1];
+      const targetImage = secondImage;
+
+      console.log('目标容器:', targetContainer);
+      console.log('目标图片:', targetImage);
+
+      // 2. 先清理之前的检测框
+      const oldHighlighters = targetContainer.querySelectorAll('.highlighter');
+      const oldClassNames = targetContainer.querySelectorAll('.className');
+      oldHighlighters.forEach(el => el.remove());
+      oldClassNames.forEach(el => el.remove());
+
+      // 3. 从摄像头捕获画面
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      console.log('捕获的画面尺寸:', canvas.width, 'x', canvas.height);
+
+      // 4. 更新图片
+      const dataUrl = canvas.toDataURL('image/png');
+      targetImage.src = dataUrl;
+
+      console.log('图片 src 已设置');
+
+      // 5. 确保faceDetector处于IMAGE模式，然后进行人脸检测
+      faceDetector.setOptions({ runningMode: "IMAGE" });
+      const detectionResult = faceDetector.detect(canvas, performance.now());
+      console.log('人脸检测结果:', detectionResult);
+
+      // 保存检测结果和画布，供Zoom功能使用
+      lastDetectionResult = {
+        result: detectionResult,
+        canvas: canvas,
+        targetImage: targetImage
+      };
+
+      // 清空之前保存的所有人脸信息
+      allDetections = [];
+
+      // 6. 延迟1秒后绘制检测框
+      console.log('等待1秒后标记人脸...');
+      setTimeout(() => {
+        console.log('1秒已过，开始标记人脸');
+        console.log('图片显示尺寸:', targetImage.clientWidth, 'x', targetImage.clientHeight);
+        console.log('图片 natural 尺寸:', targetImage.naturalWidth, 'x', targetImage.naturalHeight);
+
+        if (detectionResult.detections.length > 0) {
+          const scaleX = targetImage.clientWidth / canvas.width;
+          const scaleY = targetImage.clientHeight / canvas.height;
+
+          console.log('缩放比例:', scaleX, scaleY);
+
+          detectionResult.detections.forEach((detection, index) => {
+            const bbox = detection.boundingBox;
+            const x = bbox.originX * scaleX;
+            const y = bbox.originY * scaleY;
+            const w = bbox.width * scaleX;
+            const h = bbox.height * scaleY;
+
+            console.log('检测框坐标:', {x, y, w, h});
+
+            // 保存当前人脸信息
+            allDetections.push({
+              index: index,
+              detection: detection,
+              canvas: canvas
+            });
+
+            // 绘制红框
+            const highlighter = document.createElement('div');
+            highlighter.style.cssText = `
+              position: absolute;
+              left: ${x}px;
+              top: ${y}px;
+              width: ${w}px;
+              height: ${h}px;
+              background: transparent;
+              border: 3px solid red;
+              z-index: 10;
+              cursor: pointer;
+            `;
+            highlighter.dataset.index = index;
+            highlighter.addEventListener('click', (e) => {
+              e.stopPropagation();
+              handleFaceClick(index);
+            });
+            targetContainer.appendChild(highlighter);
+
+            // 绘制置信度
+            const label = document.createElement('p');
+            label.style.cssText = `
+              position: absolute;
+              left: ${x}px;
+              top: ${y}px;
+              width: ${w - 10}px;
+              color: white;
+              font-size: 14px;
+              background: rgba(0,0,0,0.5);
+              z-index: 11;
+              margin: 0;
+              padding: 2px;
+              pointer-events: none;
+            `;
+            label.textContent = `#${index+1} ${Math.round(detection.categories[0].score * 100)}%`;
+            targetContainer.appendChild(label);
+          });
+        } else {
+          console.log('未检测到人脸');
+        }
+      }, 1000); // 延迟1秒
+    }
+
+    // 处理摄像头切换
+    function handleCameraChange() {
+      if (webcamRunning) {
+        // 如果摄像头正在运行，切换到新选择的摄像头
+        stopCamera();
+        startCamera();
+      }
+    }
+
+    // 停止当前摄像头
+    function stopCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+    }
+
+    // 处理Zoom按钮点击
+    function handleZoom() {
+      console.log('点击了Zoom按钮');
+
+      if (!lastDetectionResult || !lastDetectionResult.result.detections.length) {
+        alert('请先点击Shot按钮拍摄并检测到人脸！');
+        return;
+      }
+
+      const { result, canvas, targetImage } = lastDetectionResult;
+      const detection = result.detections[0]; // 使用第一个检测到的人脸
+      const bbox = detection.boundingBox;
+
+      console.log('进行Zoom操作，检测框:', bbox);
+
+      // 1. 获取第一个图片和容器
+      const containers = document.getElementsByClassName('detectOnClick');
+      const firstContainer = containers[0];
+
+      // 2. 清理第一个图片之前的检测框
+      const oldHighlighters = firstContainer.querySelectorAll('.highlighter');
+      const oldClassNames = firstContainer.querySelectorAll('.className');
+      oldHighlighters.forEach(el => el.remove());
+      oldClassNames.forEach(el => el.remove());
+
+      // 3. 计算要裁剪的人脸区域（添加一些边距，让人脸不会太靠边）
+      const paddingFactor = 0.3; // 30%的边距
+      let x = bbox.originX - bbox.width * paddingFactor;
+      let y = bbox.originY - bbox.height * paddingFactor;
+      let w = bbox.width * (1 + paddingFactor * 2);
+      let h = bbox.height * (1 + paddingFactor * 2);
+
+      // 确保裁剪区域不会超出画布边界
+      x = Math.max(0, x);
+      y = Math.max(0, y);
+      w = Math.min(canvas.width - x, w);
+      h = Math.min(canvas.height - y, h);
+
+      // 4. 将裁剪区域调整为正方形（固定长宽比例1:1）
+      const size = Math.max(w, h);
+      const centerX = x + w / 2;
+      const centerY = y + h / 2;
+      let squareX = centerX - size / 2;
+      let squareY = centerY - size / 2;
+      let squareW = size;
+      let squareH = size;
+
+      // 再次确保正方形区域在画布范围内
+      if (squareX < 0) {
+        squareX = 0;
+      }
+      if (squareY < 0) {
+        squareY = 0;
+      }
+      if (squareX + squareW > canvas.width) {
+        squareW = canvas.width - squareX;
+      }
+      if (squareY + squareH > canvas.height) {
+        squareH = canvas.height - squareY;
+      }
+
+      console.log('裁剪区域:', { squareX, squareY, squareW, squareH });
+
+      // 获取第一个图片的显示尺寸，用于等比例放大
+      const firstImageDisplayWidth = firstImage.clientWidth || 600;
+      const firstImageDisplayHeight = firstImage.clientHeight || 600;
+
+      // 计算缩放比例，让裁剪后的人脸等比例放大，尽可能填满第一个图片
+      const scale = Math.min(firstImageDisplayWidth / squareW, firstImageDisplayHeight / squareH);
+      const finalWidth = squareW * scale;
+      const finalHeight = squareH * scale;
+
+      console.log('缩放参数:', { scale, finalWidth, finalHeight });
+
+      // 5. 创建新的画布，大小是等比例放大后的尺寸
+      const zoomCanvas = document.createElement('canvas');
+      zoomCanvas.width = finalWidth;
+      zoomCanvas.height = finalHeight;
+      const zoomCtx = zoomCanvas.getContext('2d');
+
+      // 从原图中裁剪人脸区域并等比例放大
+      zoomCtx.drawImage(
+        canvas,
+        squareX, squareY, squareW, squareH, // 源区域
+        0, 0, finalWidth, finalHeight         // 目标区域（等比例放大后）
+      );
+
+      // 6. 将裁剪后的图像设置到第一个图片控件中
+      firstImage.src = zoomCanvas.toDataURL('image/png');
+
+      console.log('Zoom完成！');
+    }
+
+    // 处理点击人脸框事件
+    function handleFaceClick(index) {
+      console.log(`点击了第 ${index + 1} 个人脸框`);
+
+      const faceInfo = allDetections[index];
+      if (!faceInfo) {
+        console.log('未找到对应的人脸信息');
+        return;
+      }
+
+      const { detection, canvas } = faceInfo;
+      const bbox = detection.boundingBox;
+
+      // 获取第一个图片和容器
+      const containers = document.getElementsByClassName('detectOnClick');
+      const firstContainer = containers[0];
+
+      // 清理第一个图片之前的检测框
+      const oldHighlighters = firstContainer.querySelectorAll('.highlighter');
+      const oldClassNames = firstContainer.querySelectorAll('.className');
+      oldHighlighters.forEach(el => el.remove());
+      oldClassNames.forEach(el => el.remove());
+
+      // 计算要裁剪的人脸区域（添加一些边距，让人脸不会太靠边）
+      const paddingFactor = 0.3; // 30%的边距
+      let x = bbox.originX - bbox.width * paddingFactor;
+      let y = bbox.originY - bbox.height * paddingFactor;
+      let w = bbox.width * (1 + paddingFactor * 2);
+      let h = bbox.height * (1 + paddingFactor * 2);
+
+      // 确保裁剪区域不会超出画布边界
+      x = Math.max(0, x);
+      y = Math.max(0, y);
+      w = Math.min(canvas.width - x, w);
+      h = Math.min(canvas.height - y, h);
+
+      // 将裁剪区域调整为正方形（固定长宽比例1:1）
+      const size = Math.max(w, h);
+      const centerX = x + w / 2;
+      const centerY = y + h / 2;
+      let squareX = centerX - size / 2;
+      let squareY = centerY - size / 2;
+      let squareW = size;
+      let squareH = size;
+
+      // 再次确保正方形区域在画布范围内
+      if (squareX < 0) {
+        squareX = 0;
+      }
+      if (squareY < 0) {
+        squareY = 0;
+      }
+      if (squareX + squareW > canvas.width) {
+        squareW = canvas.width - squareX;
+      }
+      if (squareY + squareH > canvas.height) {
+        squareH = canvas.height - squareY;
+      }
+
+      console.log('裁剪区域:', { squareX, squareY, squareW, squareH });
+
+      // 获取第一个图片的显示尺寸，用于等比例放大
+      const firstImageDisplayWidth = firstImage.clientWidth || 600;
+      const firstImageDisplayHeight = firstImage.clientHeight || 600;
+
+      // 计算缩放比例，让裁剪后的人脸等比例放大，尽可能填满第一个图片
+      const scale = Math.min(firstImageDisplayWidth / squareW, firstImageDisplayHeight / squareH);
+      const finalWidth = squareW * scale;
+      const finalHeight = squareH * scale;
+
+      console.log('缩放参数:', { scale, finalWidth, finalHeight });
+
+      // 创建新的画布，大小是等比例放大后的尺寸
+      const zoomCanvas = document.createElement('canvas');
+      zoomCanvas.width = finalWidth;
+      zoomCanvas.height = finalHeight;
+      const zoomCtx = zoomCanvas.getContext('2d');
+
+      // 从原图中裁剪人脸区域并等比例放大
+      zoomCtx.drawImage(
+        canvas,
+        squareX, squareY, squareW, squareH, // 源区域
+        0, 0, finalWidth, finalHeight         // 目标区域（等比例放大后）
+      );
+
+      // 将裁剪后的图像设置到第一个图片控件中
+      firstImage.src = zoomCanvas.toDataURL('image/png');
+
+      console.log('人脸裁剪完成！');
+    }
+
+    // Append score and bounding boxes to the container
+    function appendFaceDetection(result, resultContainer) {
+      const detections = result.detections;
+      console.log('appendFaceDetection - 检测到的人脸数量:', detections.length);
+
+      for (let detection of detections) {
+        console.log('检测到的人脸:', detection);
+
+        // Append score
+        const p = document.createElement('p');
+        p.innerText =
+            'Detection confidence: ' +
+            Math.round(parseFloat(detection.categories[0].score) * 100) +
+            '%';
+        p.setAttribute('class', 'className');
+        p.style.left = detection.boundingBox.originX + 'px';
+        p.style.top = detection.boundingBox.originY + 'px';
+        p.style.width = (detection.boundingBox.width - 10) + 'px';
+
+        resultContainer.appendChild(p);
+
+        // Append bounding box
+        const highlighter = document.createElement('div');
+        highlighter.setAttribute('class', 'highlighter');
+        highlighter.style.left = detection.boundingBox.originX + 'px';
+        highlighter.style.top = detection.boundingBox.originY + 'px';
+        highlighter.style.width = detection.boundingBox.width + 'px';
+        highlighter.style.height = detection.boundingBox.height + 'px';
+
+        resultContainer.appendChild(highlighter);
+      }
+    }
+
+    async function handleClick(event) {
+      if (!faceDetectorReady) {
+        console.log('Wait for faceDetector to load before clicking!');
+        return;
+      }
+
+      console.log('点击了图片');
+
+      const img = event.target;
+
+      // 检查图片是否为空
+      if (!img.src || img.src === window.location.href) {
+        alert('图片为空，请先使用摄像头和Shot功能获取图片！');
+        return;
+      }
+      const container = img.parentNode;
+
+      // Remove any previous face detection result displays
+      const oldHighlighters = container.querySelectorAll('.highlighter');
+      const oldClassNames = container.querySelectorAll('.className');
+      oldHighlighters.forEach(el => el.remove());
+      oldClassNames.forEach(el => el.remove());
+
+      // We should use the natural dimensions for detection
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // 确保faceDetector处于IMAGE模式
+      faceDetector.setOptions({ runningMode: "IMAGE" });
+
+      const result = faceDetector.detect(canvas, performance.now());
+      console.log('Detection result:', result);
+
+      // Now scale the coordinates to the DISPLAY size
+      if (result.detections.length > 0) {
+        const scaleX = img.clientWidth / img.naturalWidth;
+        const scaleY = img.clientHeight / img.naturalHeight;
+
+        console.log('缩放比例:', scaleX, scaleY);
+
+        result.detections.forEach(detection => {
+          const bbox = detection.boundingBox;
+          const x = bbox.originX * scaleX;
+          const y = bbox.originY * scaleY;
+          const w = bbox.width * scaleX;
+          const h = bbox.height * scaleY;
+
+          console.log('检测框坐标:', x, y, w, h);
+
+          // 绘制红框
+          const highlighter = document.createElement('div');
+          highlighter.style.cssText = `
+            position: absolute;
+            left: ${x}px;
+            top: ${y}px;
+            width: ${w}px;
+            height: ${h}px;
+            background: transparent;
+            border: 3px solid red;
+            z-index: 10;
+            pointer-events: none;
+          `;
+          container.appendChild(highlighter);
+
+          // 绘制置信度
+          const label = document.createElement('p');
+          label.style.cssText = `
+            position: absolute;
+            left: ${x}px;
+            top: ${y}px;
+            width: ${w - 10}px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0,0,0,0.5);
+            z-index: 11;
+            margin: 0;
+            padding: 2px;
+            pointer-events: none;
+          `;
+          label.textContent = 'Detection confidence: ' + Math.round(detection.categories[0].score * 100) + '%';
+          container.appendChild(label);
+        });
+      } else {
+        console.log('未检测到人脸');
+      }
+    }
+
+    /********************************************************************
+     // Demo 2: Continuously grab image from webcam stream and detect it.
+     ********************************************************************/
+
+    const video = document.getElementById('webcam');
+    const liveView = document.getElementById('liveView');
+
+    // Check if webcam access is supported.
+    function hasGetUserMedia() {
+      return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    // Keep a reference of all the child elements we create
+    // so we can remove them easily on each render.
+    let children = [];
+
+    // 启动摄像头
+    async function startCamera() {
+      const selectedDeviceId = cameraSelect.value;
+
+      // getUsermedia parameters.
+      const constraints = {
+        video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+      };
+
+      try {
+        // Activate the webcam stream.
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        video.addEventListener('loadeddata', predictWebcam);
+      } catch (err) {
+        console.error('启动摄像头失败:', err);
+      }
+    }
+
+    // Enable the live webcam view and start detection.
+    async function enableCam(event) {
+      if (!faceDetectorReady) {
+        console.log('Wait! faceDetector not loaded yet');
+        return;
+      }
+
+      if (webcamRunning === true) {
+        // 停止摄像头
+        webcamRunning = false;
+        enableWebcamButton.children[1].innerText = 'ENABLE WEBCAM';
+        stopCamera();
+        video.srcObject = null;
+      } else {
+        // 启动摄像头
+        webcamRunning = true;
+        enableWebcamButton.children[1].innerText = 'DISABLE WEBCAM';
+        await startCamera();
+      }
+    }
+
+    let lastVideoTime = -1;
+    async function predictWebcam() {
+      // Remove any highlighting from the previous frame FIRST
+      for (let child of children) {
+        liveView.removeChild(child);
+      }
+      children.splice(0);
+
+      // Now let's start detecting the stream.
+      if (webcamRunning === true) {
+        faceDetector.setOptions({ runningMode: "VIDEO" });
+        let startTimeMs = performance.now();
+
+        if (lastVideoTime !== video.currentTime) {
+          lastVideoTime = video.currentTime;
+          let result = faceDetector.detectForVideo(video, startTimeMs);
+          console.log('Video detection result:', result);
+
+          if (result.detections.length > 0) {
+            // Calculate scale from video native size to display size
+            const scaleX = video.clientWidth / video.videoWidth;
+            const scaleY = video.clientHeight / video.videoHeight;
+
+            for (let detection of result.detections) {
+              // Scale the detection coordinates
+              const x = detection.boundingBox.originX * scaleX;
+              const y = detection.boundingBox.originY * scaleY;
+              const w = detection.boundingBox.width * scaleX;
+              const h = detection.boundingBox.height * scaleY;
+
+              // Draw bounding boxes
+              const p = document.createElement('p');
+              p.setAttribute('class', 'className');
+              p.innerText =
+                  'Detection confidence: ' +
+                  Math.round(parseFloat(detection.categories[0].score) * 100) +
+                  '%';
+
+              // Hide the bounding box and label if the confidence is below 0.3
+              if (detection.categories[0].score < 0.3) {
+                p.style.display = 'none';
+              } else {
+                p.style.left = x + 'px';
+                p.style.top = y + 'px';
+                p.style.width = (w - 10) + 'px';
+              }
+
+              liveView.appendChild(p);
+              children.push(p);
+
+              const highlighter = document.createElement('div');
+              highlighter.setAttribute('class', 'highlighter');
+              if (detection.categories[0].score < 0.3) {
+                highlighter.style.display = 'none';
+              } else {
+                highlighter.style.left = x + 'px';
+                highlighter.style.top = y + 'px';
+                highlighter.style.width = w + 'px';
+                highlighter.style.height = h + 'px';
+              }
+
+              liveView.appendChild(highlighter);
+              children.push(highlighter);
+            }
+          }
+        }
+
+        // Call this function again to keep predicting when the browser is ready.
+        window.requestAnimationFrame(predictWebcam);
+      }
+    }
+  </script>
+</body>
+</html>
