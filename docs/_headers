@@ -1,0 +1,12 @@
+# 全局跨域隔离头，解决 WASM 多线程警告
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+# 给所有onnx强制二进制MIME类型，解决protobuf解析失败
+/assets/models/*.onnx
+  Content-Type: application/octet-stream
+
+# 可选：tflite模型也指定二进制
+/assets/models/*.tflite
+  Content-Type: application/octet-stream
