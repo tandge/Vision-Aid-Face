@@ -1,9 +1,7 @@
-# 全局跨域隔离配置，credentialless兼容GitHub Pages静态资源，不拦截本地wasm/js/模型
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
 
-# 模型文件强制二进制MIME，修复protobuf解析失败 ERROR_CODE:7
 /assets/models/*.onnx
   Content-Type: application/octet-stream
 
