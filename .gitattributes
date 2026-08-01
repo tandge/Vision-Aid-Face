@@ -1,15 +1,13 @@
-*.onnx filter=lfs diff=lfs merge=lfs -text
-*.tflite filter=lfs diff=lfs merge=lfs -text
-*.wasm filter=lfs diff=lfs merge=lfs -text
+# 所有二进制资源：强制标记为非文本，Git绝不修改字节
+*.onnx -text
+*.tflite -text
+*.wasm -text
+*.png -text
+*.jpg -text
+*.webp -text
+*.js -text
+*.mjs -text
+*.html -text
+*.css -text
 
-# 自己写的源码JS、ESM，统一LF换行
-*.js text eol=lf
-*.mjs text eol=lf
-
-
-
-# 图片资源（可选）
-*.png filter=lfs diff=lfs merge=lfs -text
-*.jpg filter=lfs diff=lfs merge=lfs -text
-*.webp filter=lfs diff=lfs merge=lfs -text
 
