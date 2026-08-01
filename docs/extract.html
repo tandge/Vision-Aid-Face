@@ -126,9 +126,9 @@ function showSpinner(el, msg) {
 async function initialize() {
   try {
     showSpinner(initStatus, 'Loading MediaPipe WASM...');
-    const vision = await FilesetResolver.forVisionTasks('./assets/wasm');
+    const vision = await FilesetResolver.forVisionTasks('./assets/wasm_full');
     faceDetector = await FaceDetector.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: './assets/models/blaze_face_short_range.tflite' },
+      baseOptions: { modelAssetPath: './assets/models/blaze_face_full_range.tflite' },
       runningMode: 'IMAGE'
     });
     console.log('[init] MediaPipe FaceDetector ready (IMAGE mode)');
