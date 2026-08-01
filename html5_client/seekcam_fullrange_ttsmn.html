@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>摄像头识人V260720.2</title>
+<title>摄像头识人V260726.1</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 20px; }
@@ -118,6 +118,11 @@
       <input type="range" id="ttsSpeedSlider" min="5" max="40" value="26" step="1">
       <span id="ttsSpeedValue">2.6</span>
     </div>
+    <div class="threshold-row">
+      <label for="zoomSlider">放大</label>
+      <input type="range" id="zoomSlider" min="1" max="3" value="1" step="0.1" disabled>
+      <span id="zoomValue">1.0x</span>
+    </div>
   </div>
   <div class="section">
     <h3>摄像头输出</h3>
@@ -177,6 +182,8 @@ const thresholdSlider = document.getElementById('thresholdSlider');
 const thresholdValue = document.getElementById('thresholdValue');
 const ttsSpeedSlider = document.getElementById('ttsSpeedSlider');
 const ttsSpeedValue = document.getElementById('ttsSpeedValue');
+const zoomSlider = document.getElementById('zoomSlider');
+const zoomValue = document.getElementById('zoomValue');
 const cycleCount = document.getElementById('cycleCount');
 const matchCount = document.getElementById('matchCount');
 const faceCount = document.getElementById('faceCount');
@@ -199,6 +206,10 @@ let lastAnnouncedNamesStr = null;
 let cameraDevices = [];
 let selectedDeviceId = null;
 let mediaStream = null;
+let videoTrack = null;
+let zoomSupported = false;
+let maxHardwareZoom = 3.0;
+let currentZoom = 1.0;
 
 // ============ Model Configuration ============
 const MODEL_CONFIGS = {
@@ -225,7 +236,7 @@ const TEMPLATE_POINTS = [
   { x: 56.0, y: 71.0 }
 ];
 const ALIGN_SIZE = 112;
-const DETECT_CONFIDENCE_THRESHOLD = 0.7;
+const DETECT_CONFIDENCE_THRESHOLD = 0.5;
 
 // ============ Utility Functions ============
 
@@ -473,6 +484,23 @@ ttsSpeedSlider.addEventListener('input', () => {
   ttsSpeedValue.textContent = val.toFixed(1);
 });
 
+zoomSlider.addEventListener('input', () => {
+  const val = parseFloat(zoomSlider.value);
+  zoomValue.textContent = val.toFixed(1) + 'x';
+  setZoom(val);
+});
+
+async function setZoom(zoomVal) {
+  currentZoom = zoomVal;
+  if (zoomSupported && videoTrack) {
+    try {
+      await videoTrack.applyConstraints({ zoom: zoomVal });
+    } catch (e) {
+      console.warn('[zoom] Failed to apply hardware zoom:', e.message);
+    }
+  }
+}
+
 function getTtsSpeed() {
   return parseInt(ttsSpeedSlider.value) / 10;
 }
@@ -616,6 +644,28 @@ async function openCameraStream() {
 
   videoElement.srcObject = mediaStream;
 
+  videoTrack = mediaStream.getVideoTracks()[0];
+  // Detect hardware zoom support
+  const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
+  zoomSupported = !!(supportedConstraints && supportedConstraints.zoom);
+  if (zoomSupported && videoTrack) {
+    try {
+      const caps = videoTrack.getCapabilities();
+      if (caps && caps.zoom) {
+        maxHardwareZoom = caps.zoom.max || 3.0;
+        console.log('[zoom] Hardware zoom supported, max:', maxHardwareZoom);
+      } else {
+        zoomSupported = false;
+      }
+    } catch (e) {
+      zoomSupported = false;
+      console.warn('[zoom] Failed to get zoom capabilities:', e.message);
+    }
+  }
+  if (!zoomSupported) {
+    console.log('[zoom] Hardware zoom NOT supported, using software simulation');
+  }
+
   await new Promise((resolve, reject) => {
     videoElement.onloadedmetadata = () => {
       console.log('[camera] Stream ready: ' + videoElement.videoWidth + 'x' + videoElement.videoHeight);
@@ -634,6 +684,7 @@ function closeCameraStream() {
     mediaStream = null;
   }
   videoElement.srcObject = null;
+  videoTrack = null;
 }
 
 // ============ Image Capture from Camera ============
@@ -663,7 +714,16 @@ function captureCameraFrame() {
   detectCanvas.width = captureW;
   detectCanvas.height = captureH;
   const dctx = detectCanvas.getContext('2d');
-  dctx.drawImage(videoElement, 0, 0, captureW, captureH);
+  // Software zoom: crop center of video frame and scale to capture size
+  if (!zoomSupported && currentZoom > 1.0) {
+    const cropW = vw / currentZoom;
+    const cropH = vh / currentZoom;
+    const offsetX = (vw - cropW) / 2;
+    const offsetY = (vh - cropH) / 2;
+    dctx.drawImage(videoElement, offsetX, offsetY, cropW, cropH, 0, 0, captureW, captureH);
+  } else {
+    dctx.drawImage(videoElement, 0, 0, captureW, captureH);
+  }
 
   const DISPLAY_MAX = 640;
   let displayW = captureW;
@@ -678,7 +738,15 @@ function captureCameraFrame() {
   cameraCanvas.width = displayW;
   cameraCanvas.height = displayH;
   const ctx = cameraCanvas.getContext('2d');
-  ctx.drawImage(videoElement, 0, 0, displayW, displayH);
+  if (!zoomSupported && currentZoom > 1.0) {
+    const cropW = vw / currentZoom;
+    const cropH = vh / currentZoom;
+    const offsetX = (vw - cropW) / 2;
+    const offsetY = (vh - cropH) / 2;
+    ctx.drawImage(videoElement, offsetX, offsetY, cropW, cropH, 0, 0, displayW, displayH);
+  } else {
+    ctx.drawImage(videoElement, 0, 0, displayW, displayH);
+  }
 
   const scaleRatio = displayW / captureW;
 
@@ -1287,6 +1355,12 @@ async function startMonitoring() {
     lastAnnouncedNamesStr = null;
     cameraRadioGroup.disabled = true;
 
+    zoomSlider.disabled = false;
+    zoomSlider.max = maxHardwareZoom;
+    zoomSlider.value = 1.0;
+    zoomValue.textContent = '1.0x';
+    currentZoom = 1.0;
+
     monitorIndicator.innerHTML = '<span class="detect-indicator active"></span> Monitoring...';
     setStatus(cameraStatus, 'info', 'Monitoring started - checking every 1 second');
 
@@ -1334,6 +1408,11 @@ function stopMonitoring() {
   galleryInput.disabled = false;
   lastAnnouncedNamesStr = null;
   cameraRadioGroup.disabled = false;
+
+  zoomSlider.disabled = true;
+  zoomSlider.value = 1.0;
+  zoomValue.textContent = '1.0x';
+  currentZoom = 1.0;
 
   monitorIndicator.innerHTML = '<span class="detect-indicator inactive"></span> Stopped';
   setStatus(cameraStatus, 'info', 'Monitoring stopped');
