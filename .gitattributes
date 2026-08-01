@@ -1,3 +1,17 @@
 *.onnx filter=lfs diff=lfs merge=lfs -text
 *.tflite filter=lfs diff=lfs merge=lfs -text
+*.wasm filter=lfs diff=lfs merge=lfs -text
+
+# 自己写的源码JS、ESM，统一LF换行
+*.js text eol=lf
+*.mjs text eol=lf
+
+# 超大第三方编译JS库（按需补充文件名）
+ort.all.min.js filter=lfs diff=lfs merge=lfs -text
+vision_wasm_internal.js filter=lfs diff=lfs merge=lfs -text
+
+# 图片资源（可选）
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.webp filter=lfs diff=lfs merge=lfs -text
 
