@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>特征提取</title>
+    <title>人脸库管理20260723.1</title>
+    <link rel="stylesheet" href="js/tabulator.min.css">
+    <script src="js/Dexie.js"></script>
+    <script src="js/tabulator.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -12,629 +15,456 @@
             min-height: 100vh;
             padding: 20px;
         }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px 8px 0 0;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+        }
         .container {
-            max-width: 680px;
+            max-width: 1100px;
             margin: 0 auto;
             background: white;
             border-radius: 8px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             overflow: hidden;
         }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 24px;
-            font-size: 18px;
-            font-weight: 700;
-            text-align: center;
+        #face-table { min-height: 350px; }
+        .add-form {
+            padding: 14px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            border-bottom: 1px solid #e0e0e0;
+            flex-wrap: wrap;
         }
-        .body {
-            padding: 16px;
-        }
-        .status {
-            padding: 8px 14px;
+        .add-form label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+        .add-form input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
             border-radius: 6px;
-            font-size: 13px;
-            margin-bottom: 12px;
-            background: #e8f4fd;
-            color: #3178c6;
-            border: 1px solid #b8d8f0;
-            min-height: 20px;
-            line-height: 1.4;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
         }
-        .status.error { background: #fde8e8; color: #c63030; border-color: #f0b8b8; }
-        .status.success { background: #e8fde8; color: #30a630; border-color: #b8f0b8; }
-        .status.warn { background: #fdf4e8; color: #a67c30; border-color: #f0d8b8; }
-        .spinner {
-            display: inline-block; width: 12px; height: 12px;
-            border: 2px solid rgba(102,126,234,0.3); border-top-color: #667eea;
-            border-radius: 50%; animation: spin 0.6s linear infinite;
-            margin-right: 6px; vertical-align: middle;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .btn-row {
-            display: flex; gap: 10px; align-items: center; margin-bottom: 12px;
-        }
-        button {
-            padding: 8px 20px;
+        .add-form input:focus { border-color: #667eea; }
+        .add-form input[name="addName"] { width: 130px; }
+        .add-form input[name="addVector"] { flex: 1; min-width: 280px; }
+        .add-form button {
+            padding: 8px 24px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 6px;
             font-size: 14px;
             cursor: pointer;
-            transition: transform 0.2s;
             white-space: nowrap;
+            transition: transform 0.2s;
         }
-        button:hover { transform: translateY(-1px); }
-        button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-        button.btn-copy {
-            background: #17a2b8;
-            padding: 6px 16px;
-            font-size: 13px;
+        .add-form button:hover { transform: translateY(-1px); }
+        .toolbar {
+            padding: 10px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            border-bottom: 1px solid #e0e0e0;
         }
-        #fileInput { display: none; }
-        .file-info { font-size: 12px; color: #888; }
-        .canvas-row {
-            display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px;
+        .toolbar button {
+            padding: 8px 20px;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s;
         }
-        .canvas-box { text-align: center; }
-        .canvas-box canvas, .canvas-box img {
-            border: 2px solid #ddd; border-radius: 4px; background: #f8f8f8;
-            max-width: 100%; height: auto;
+        .toolbar button:hover { transform: translateY(-1px); }
+        .btn-refresh { background: #6c757d; }
+        .btn-save { background: #28a745; }
+        .btn-save.saved { background: #6c757d; }
+        .btn-export { background: #17a2b8; }
+        .btn-import { background: #ffc107; color: #333; }
+        #importFile { display: none; }
+        .status { margin-left: auto; font-size: 13px; color: #666; }
+        .status.dirty { color: #e67e22; font-weight: 600; }
+        .row-del-btn {
+            padding: 4px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
         }
-        .canvas-box .label { font-size: 11px; color: #999; margin-top: 4px; }
-        #alignedImg { width: 80px; height: 80px; image-rendering: pixelated; border-color: #667eea; }
-        textarea {
-            width: 100%; min-height: 70px; padding: 8px;
-            font-family: "Courier New", monospace; font-size: 11px;
-            background: #f8f9fa; color: #333;
-            border: 1px solid #ddd; border-radius: 6px;
-            resize: vertical; word-break: break-all; outline: none;
+        .row-del-btn:hover { background: #c82333; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
         }
-        textarea:focus { border-color: #667eea; }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #28a745; }
+        .toast.error { background: #dc3545; }
     </style>
 </head>
 <body>
+<div class="toast" id="toast"></div>
 <div class="container">
-    <div class="header">特征提取</div>
-    <div class="body">
-        <div id="status" class="status"><span class="spinner"></span> 正在初始化...</div>
-        <div class="btn-row">
-            <button id="btnSelect" disabled>选择照片</button>
-            <span class="file-info" id="fileInfo">未选择文件</span>
-            <button class="btn-copy" id="btnCopy" disabled style="margin-left:auto;">复制特征</button>
+    <div class="header">人脸特征库管理</div>
+    <div class="add-form">
+        <div>
+            <label>姓名</label>
+            <input type="text" name="addName" id="addName" placeholder="张三">
         </div>
-        <input type="file" id="fileInput" accept="image/jpeg,image/png">
-        <div class="canvas-row">
-            <div class="canvas-box">
-                <canvas id="mainCanvas" width="240" height="180"></canvas>
-                <div class="label">照片</div>
-            </div>
-            <div class="canvas-box">
-                <img id="alignedImg" src="" alt="\u4eba\u8138" style="display:none;">
-                <canvas id="alignedCanvas" width="112" height="112" style="display:none;"></canvas>
-                <div class="label">对齐人脸</div>
-            </div>
+        <div style="flex:1;min-width:280px;">
+            <label>特征向量 (JSON数组)</label>
+            <input type="text" name="addVector" id="addVector" placeholder="[0.01, -0.02, 0.03, ...]">
         </div>
-        <textarea id="featureOutput" readonly placeholder="选择照片后将自动提取特征向量..."></textarea>
+        <button onclick="addRecord()">新 增</button>
     </div>
+    <div class="toolbar">
+        <button class="btn-refresh" onclick="refreshTable()">刷 新</button>
+        <button class="btn-save" id="btnSave" onclick="saveToDB()">保存到本地</button>
+        <button class="btn-export" onclick="exportToFile()">导出人脸库</button>
+        <button class="btn-import" onclick="importFromFile()">导入人脸库</button>
+        <input type="file" id="importFile" accept=".json" onchange="handleImportFile(event)">
+        <span class="status" id="status">加载中...</span>
+    </div>
+    <div id="face-table"></div>
 </div>
+<script>
+var table;
+var dirty = false;
+var origFaceLib = {};
 
-<script src="./assets/exifr/full.umd.js"></script>
-<script src="./assets/onnxruntime/ort.all.min.js"></script>
-<script type="module">
-
-import { FaceDetector, FilesetResolver } from './assets/vision_bundle.mjs';
-
-const btnSelect = document.getElementById('btnSelect');
-const fileInput = document.getElementById('fileInput');
-const fileInfo = document.getElementById('fileInfo');
-const mainCanvas = document.getElementById('mainCanvas');
-const alignedCanvas = document.getElementById('alignedCanvas');
-const alignedImg = document.getElementById('alignedImg');
-const btnCopy = document.getElementById('btnCopy');
-const featureOutput = document.getElementById('featureOutput');
-const status = document.getElementById('status');
-
-let faceDetector = null;
-let ortSession = null;
-let currentImageData = null;
-let alignedFacePixels = null;
-let isNCHW = false;
-
-const TEMPLATE_POINTS = [
-    { x: 38.0, y: 51.0 },
-    { x: 74.0, y: 51.0 },
-    { x: 56.0, y: 71.0 }
-];
-
-function setStatus(type, msg) {
-    status.className = 'status ' + type;
-    status.innerHTML = msg;
+function showToast(msg, type) {
+    type = type || "success";
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast " + type + " show";
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.className = "toast"; }, 2000);
 }
 
-function showSpinner(msg) {
-    status.className = 'status';
-    status.innerHTML = '<span class="spinner"></span> ' + msg;
+function setStatus(msg, isDirty) {
+    var s = document.getElementById("status");
+    s.textContent = msg;
+    if (isDirty) { s.classList.add("dirty"); }
+    else { s.classList.remove("dirty"); }
 }
 
-function clearFeatureOutput() {
-    featureOutput.value = '';
-    btnCopy.disabled = true;
-    alignedFacePixels = null;
-    alignedImg.style.display = 'none';
-    alignedCanvas.style.display = 'none';
+function markDirty() {
+    dirty = true;
+    setStatus("有未保存的修改", true);
 }
 
-async function initialize() {
+function tryParseVector(str) {
     try {
-        showSpinner('加载 MediaPipe WASM...');
-        const vision = await FilesetResolver.forVisionTasks('./assets/wasm_full');
-        faceDetector = await FaceDetector.createFromOptions(vision, {
-            baseOptions: { modelAssetPath: './assets/models/blaze_face_full_range.tflite' },
-            runningMode: 'IMAGE'
-        });
-        console.log('[init] MediaPipe FaceDetector ready');
+        var arr = JSON.parse(str);
+        return Array.isArray(arr) ? arr : null;
+    } catch (e) { return null; }
+}
 
-        showSpinner('加载 ONNX MobileFaceNet...');
-        ortSession = await ort.InferenceSession.create('./assets/models/w600k_mbf.onnx', {
-            executionProviders: ['wasm'],
-            graphOptimizationLevel: 'all'
-        });
-
-        let modelInputShape = null;
-        try {
-            if (ortSession.inputs && ortSession.inputs[0] && ortSession.inputs[0].shape) {
-                modelInputShape = ortSession.inputs[0].shape;
+table = new Tabulator("#face-table", {
+    layout: "fitColumns",
+    pagination: true,
+    paginationSize: 20,
+    placeholder: "暂无数据，请先添加",
+    columns: [
+        { title: "序号", formatter: "rownum", width: 60, hozAlign: "center", headerSort: false },
+        {
+            title: "姓名", field: "name", sorter: "string", headerFilter: "input",
+            editor: "input",
+            cellEdited: function (cell) { markDirty(); }
+        },
+        {
+            title: "维度", field: "dim", width: 70, hozAlign: "center", sorter: "number",
+            editor: false
+        },
+        {
+            title: "特征向量(前5项预览)", field: "preview", width: 280,
+            editor: false
+        },
+        {
+            title: "特征向量(完整JSON)", field: "full", width: 350,
+            editor: "input",
+            cellEdited: function (cell) {
+                var row = cell.getRow();
+                var data = row.getData();
+                var vec = tryParseVector(data.full);
+                if (vec) {
+                    row.update({
+                        dim: vec.length,
+                        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "")
+                    });
+                }
+                markDirty();
             }
-        } catch (_) {}
-
-        if (modelInputShape && modelInputShape.length === 4) {
-            if (modelInputShape[1] === 3) {
-                isNCHW = true;
-            } else if (modelInputShape[3] === 3) {
-                isNCHW = false;
-            } else {
-                isNCHW = true;
-            }
-        } else {
-            isNCHW = true;
-        }
-
-        console.log('[init] NCHW:', isNCHW);
-        setStatus('success', '就绪 — 请选择照片');
-        btnSelect.disabled = false;
-
-    } catch (err) {
-        console.error('[init] Failed:', err);
-        setStatus('error', '初始化失败: ' + err.message);
-    }
-}
-
-btnSelect.addEventListener('click', () => fileInput.click());
-
-fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    fileInfo.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
-    clearFeatureOutput();
-    setStatus('', '\u6b63\u5728\u5904\u7406...');
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-
-        const [exifData, imageBitmap] = await Promise.all([
-            parseExifOrientation(arrayBuffer),
-            loadImageBitmap(file)
-        ]);
-
-        let rotationAngle = 0;
-        let swapWH = false;
-
-        if (exifData && exifData.orientation) {
-            const ori = exifData.orientation;
-            switch (ori) {
-                case 1: rotationAngle = 0;          swapWH = false; break;
-                case 2: rotationAngle = 0;          swapWH = false; break;
-                case 3: rotationAngle = Math.PI;    swapWH = false; break;
-                case 4: rotationAngle = Math.PI;    swapWH = false; break;
-                case 5: rotationAngle = Math.PI/2;  swapWH = true;  break;
-                case 6: rotationAngle = Math.PI/2;  swapWH = true;  break;
-                case 7: rotationAngle = -Math.PI/2; swapWH = true;  break;
-                case 8: rotationAngle = -Math.PI/2; swapWH = true;  break;
-                default: rotationAngle = 0; swapWH = false;
-            }
-        }
-
-        let imgW = imageBitmap.width;
-        let imgH = imageBitmap.height;
-        if (swapWH) [imgW, imgH] = [imgH, imgW];
-
-        const MAX_SIZE = 640, MIN_SIZE = 160;
-        let scale = 1.0;
-        const maxDim = Math.max(imgW, imgH);
-        if (maxDim > MAX_SIZE) scale = MAX_SIZE / maxDim;
-        const minDim = Math.min(imgW, imgH);
-        if (minDim * scale < MIN_SIZE) {
-            scale = MIN_SIZE / minDim;
-            if (maxDim * scale > MAX_SIZE) scale = MAX_SIZE / maxDim;
-        }
-
-        let canvasW = Math.round(imgW * scale);
-        let canvasH = Math.round(imgH * scale);
-        if (swapWH) [canvasW, canvasH] = [canvasH, canvasW];
-
-        mainCanvas.width = canvasW;
-        mainCanvas.height = canvasH;
-        const ctx = mainCanvas.getContext('2d');
-        ctx.clearRect(0, 0, canvasW, canvasH);
-
-        if (rotationAngle !== 0) {
-            ctx.save();
-            ctx.translate(canvasW / 2, canvasH / 2);
-            ctx.rotate(rotationAngle);
-            ctx.drawImage(imageBitmap, -imgW / 2 * scale, -imgH / 2 * scale, imgW * scale, imgH * scale);
-            ctx.restore();
-        } else {
-            ctx.drawImage(imageBitmap, 0, 0, canvasW, canvasH);
-        }
-
-        currentImageData = ctx.getImageData(0, 0, canvasW, canvasH);
-
-        await runFaceDetection();
-
-    } catch (err) {
-        console.error('[stage1] Failed:', err);
-        setStatus('error', '\u5904\u7406\u5931\u8d25: ' + err.message);
-    }
-});
-
-async function parseExifOrientation(arrayBuffer) {
-    try {
-        if (typeof exifr !== 'undefined' && exifr.parse) {
-            return await exifr.parse(arrayBuffer, ['Orientation']);
-        }
-        return null;
-    } catch (err) {
-        return null;
-    }
-}
-
-async function loadImageBitmap(file) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.onload = () => {
-            URL.revokeObjectURL(url);
-            createImageBitmap(img).then(resolve).catch(() => resolve(img));
-        };
-        img.onerror = () => {
-            URL.revokeObjectURL(url);
-            reject(new Error('\u56fe\u7247\u52a0\u8f7d\u5931\u8d25'));
-        };
-        img.src = url;
-    });
-}
-
-async function runFaceDetection() {
-    if (!faceDetector || !currentImageData) {
-        setStatus('error', '\u68c0\u6d4b\u5668\u6216\u56fe\u7247\u672a\u5c31\u7eea');
-        return;
-    }
-
-    showSpinner('\u4eba\u8138\u68c0\u6d4b\u4e2d...');
-
-    try {
-        const result = faceDetector.detect(mainCanvas);
-        const detections = result.detections || [];
-
-        if (detections.length === 0) {
-            setStatus('warn', '\u672a\u68c0\u6d4b\u5230\u4eba\u8138');
-            return;
-        }
-
-        const validDetections = detections.filter(d => getDetectionScore(d) > 0.7);
-
-        if (validDetections.length === 0) {
-            setStatus('warn', '\u672a\u68c0\u6d4b\u5230\u6709\u6548\u4eba\u8138\uff08\u7f6e\u4fe1\u5ea6\u5747 \u2264 0.7\uff09');
-            drawDetections(detections, mainCanvas);
-            return;
-        }
-
-        let bestDetection = validDetections[0];
-        let bestScore = getDetectionScore(bestDetection);
-        for (let i = 1; i < validDetections.length; i++) {
-            const score = getDetectionScore(validDetections[i]);
-            if (score > bestScore) { bestScore = score; bestDetection = validDetections[i]; }
-        }
-
-        const keypoints = bestDetection.keypoints || [];
-        if (keypoints.length < 3) {
-            setStatus('error', '\u5173\u952e\u70b9\u4e0d\u8db3\uff08\u9700 \u2265 3\uff09');
-            return;
-        }
-
-        const imgW = mainCanvas.width;
-        const imgH = mainCanvas.height;
-        const currentKeypoints = [
-            { x: keypoints[0].x * imgW, y: keypoints[0].y * imgH },
-            { x: keypoints[1].x * imgW, y: keypoints[1].y * imgH },
-            { x: keypoints[2].x * imgW, y: keypoints[2].y * imgH }
-        ];
-
-        drawDetection(bestDetection, mainCanvas, bestScore);
-
-        await alignFace(currentKeypoints);
-
-    } catch (err) {
-        console.error('[detect] Failed:', err);
-        setStatus('error', '\u4eba\u8138\u68c0\u6d4b\u5931\u8d25: ' + err.message);
-    }
-}
-
-function getDetectionScore(detection) {
-    if (detection.categories && detection.categories.length > 0) {
-        return detection.categories[0].score;
-    }
-    if (typeof detection.score === 'number') return detection.score;
-    return 0;
-}
-
-function drawDetections(detections, canvas) {
-    const ctx = canvas.getContext('2d');
-    if (currentImageData) ctx.putImageData(currentImageData, 0, 0);
-    const cw = canvas.width, ch = canvas.height;
-    for (const det of detections) {
-        const bbox = det.boundingBox;
-        if (!bbox) continue;
-        ctx.strokeStyle = '#ff6600';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(bbox.originX, bbox.originY, bbox.width, bbox.height);
-        const kps = det.keypoints || [];
-        for (const kp of kps) {
-            ctx.fillStyle = '#00ff00';
-            ctx.beginPath();
-            ctx.arc(kp.x * cw, kp.y * ch, 3, 0, 2 * Math.PI);
-            ctx.fill();
-        }
-    }
-}
-
-function drawDetection(detection, canvas, score) {
-    const ctx = canvas.getContext('2d');
-    if (currentImageData) ctx.putImageData(currentImageData, 0, 0);
-
-    const bbox = detection.boundingBox;
-    if (!bbox) return;
-
-    ctx.strokeStyle = '#667eea';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(bbox.originX, bbox.originY, bbox.width, bbox.height);
-
-    ctx.fillStyle = '#667eea';
-    ctx.font = 'bold 12px monospace';
-    ctx.fillText((score * 100).toFixed(1) + '%', bbox.originX, bbox.originY - 4);
-
-    const kps = detection.keypoints || [];
-    const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff'];
-    const labels = ['R-Eye', 'L-Eye', 'Nose', 'Mouth', 'L-Ear', 'R-Ear'];
-    const cw = canvas.width, ch = canvas.height;
-
-    for (let i = 0; i < kps.length; i++) {
-        const kp = kps[i];
-        const px = kp.x * cw, py = kp.y * ch;
-        ctx.fillStyle = colors[i] || '#fff';
-        ctx.beginPath();
-        ctx.arc(px, py, 3, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = '9px monospace';
-        ctx.fillText(labels[i] || i, px + 5, py - 5);
-    }
-}
-
-async function alignFace(currentKeypoints) {
-    if (!currentKeypoints || !currentImageData) {
-        setStatus('error', '\u5bf9\u9f50\u6570\u636e\u4e0d\u5b8c\u6574');
-        return;
-    }
-
-    showSpinner('\u4eba\u8138\u5bf9\u9f50\u4e2d...');
-
-    try {
-        const M = computeSimilarityTransform(currentKeypoints, TEMPLATE_POINTS);
-        const { scale, cosT, sinT, tx, ty } = M;
-
-        const offCtx = alignedCanvas.getContext('2d');
-        alignedCanvas.width = 112;
-        alignedCanvas.height = 112;
-        offCtx.clearRect(0, 0, 112, 112);
-
-        offCtx.save();
-        offCtx.setTransform(
-            scale * cosT,  scale * sinT,
-            -scale * sinT, scale * cosT,
-            tx, ty
-        );
-        offCtx.imageSmoothingEnabled = true;
-        offCtx.imageSmoothingQuality = 'medium';
-        offCtx.drawImage(mainCanvas, 0, 0);
-        offCtx.restore();
-
-        replicateBorder(offCtx);
-
-        const alignedImageData = offCtx.getImageData(0, 0, 112, 112);
-        alignedFacePixels = new Uint8ClampedArray(alignedImageData.data);
-
-        alignedCanvas.toBlob(blob => {
-            if (!blob) return;
-            const url = URL.createObjectURL(blob);
-            if (alignedImg.src && alignedImg.src.startsWith('blob:')) URL.revokeObjectURL(alignedImg.src);
-            alignedImg.src = url;
-            alignedImg.style.display = 'block';
-        }, 'image/png');
-
-        await extractFeature();
-
-    } catch (err) {
-        console.error('[align] Failed:', err);
-        setStatus('error', '\u4eba\u8138\u5bf9\u9f50\u5931\u8d25: ' + err.message);
-    }
-}
-
-function replicateBorder(ctx) {
-    const imgData = ctx.getImageData(0, 0, 112, 112);
-    const d = imgData.data;
-    const W = 112, H = 112;
-
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const idx = (y * W + x) * 4;
-            if (d[idx + 3] === 0) {
-                let found = false;
-                for (let r = 1; r < Math.max(W, H) && !found; r++) {
-                    for (let dy = -r; dy <= r && !found; dy++) {
-                        for (let dx = -r; dx <= r && !found; dx++) {
-                            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                            const nx = x + dx, ny = y + dy;
-                            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-                            const nidx = (ny * W + nx) * 4;
-                            if (d[nidx + 3] > 0) {
-                                d[idx]     = d[nidx];
-                                d[idx + 1] = d[nidx + 1];
-                                d[idx + 2] = d[nidx + 2];
-                                d[idx + 3] = 255;
-                                found = true;
-                            }
-                        }
-                    }
+        },
+        {
+            title: "操作", field: "actions", width: 80, hozAlign: "center",
+            headerSort: false,
+            formatter: function (cell) {
+                return '<button class="row-del-btn">删除</button>';
+            },
+            cellClick: function (e, cell) {
+                var row = cell.getRow();
+                var name = row.getData().name;
+                if (confirm('确定删除 "' + name + '" 吗？')) {
+                    row.delete();
+                    markDirty();
+                    showToast('已删除 "' + name + '"');
                 }
             }
         }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-}
-
-function computeSimilarityTransform(srcPoints, dstPoints) {
-    const [sx1, sy1] = [srcPoints[0].x, srcPoints[0].y];
-    const [sx2, sy2] = [srcPoints[1].x, srcPoints[1].y];
-    const [sx3, sy3] = [srcPoints[2].x, srcPoints[2].y];
-
-    const [dx1, dy1] = [dstPoints[0].x, dstPoints[0].y];
-    const [dx2, dy2] = [dstPoints[1].x, dstPoints[1].y];
-    const [dx3, dy3] = [dstPoints[2].x, dstPoints[2].y];
-
-    const srcEyeDist = Math.sqrt((sx2 - sx1) ** 2 + (sy2 - sy1) ** 2);
-    const dstEyeDist = Math.sqrt((dx2 - dx1) ** 2 + (dy2 - dy1) ** 2);
-    const scale = dstEyeDist / srcEyeDist;
-
-    const srcAngle = Math.atan2(sy2 - sy1, sx2 - sx1);
-    const dstAngle = Math.atan2(dy2 - dy1, dx2 - dx1);
-    const theta = dstAngle - srcAngle;
-
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-
-    const nx = scale * (cosT * sx3 - sinT * sy3);
-    const ny = scale * (sinT * sx3 + cosT * sy3);
-    const tx = dx3 - nx;
-    const ty = dy3 - ny;
-
-    return { scale, cosT, sinT, tx, ty };
-}
-
-async function extractFeature() {
-    if (!ortSession || !alignedFacePixels) {
-        setStatus('error', 'ONNX\u6a21\u578b\u6216\u5bf9\u9f50\u6570\u636e\u672a\u5c31\u7eea');
-        return;
-    }
-
-    showSpinner('\u7279\u5f81\u63d0\u53d6\u4e2d...');
-
-    try {
-        const pixels = alignedFacePixels;
-        const rgb = new Float32Array(112 * 112 * 3);
-
-        for (let i = 0; i < 112 * 112; i++) {
-            rgb[i * 3]     = (pixels[i * 4]     / 255.0 - 0.5) * 2;
-            rgb[i * 3 + 1] = (pixels[i * 4 + 1] / 255.0 - 0.5) * 2;
-            rgb[i * 3 + 2] = (pixels[i * 4 + 2] / 255.0 - 0.5) * 2;
-        }
-
-        let tensorData, tensorShape;
-
-        if (isNCHW) {
-            tensorShape = [1, 3, 112, 112];
-            tensorData = new Float32Array(3 * 112 * 112);
-            for (let i = 0; i < 112 * 112; i++) {
-                tensorData[i]                 = rgb[i * 3];
-                tensorData[112 * 112 + i]     = rgb[i * 3 + 1];
-                tensorData[2 * 112 * 112 + i] = rgb[i * 3 + 2];
-            }
-        } else {
-            tensorShape = [1, 112, 112, 3];
-            tensorData = rgb;
-        }
-
-        const inputName = ortSession.inputNames[0];
-        const outputName = ortSession.outputNames[0];
-        const inputTensor = new ort.Tensor('float32', tensorData, tensorShape);
-
-        const feeds = {};
-        feeds[inputName] = inputTensor;
-
-        const results = await ortSession.run(feeds);
-        const outputTensor = results[outputName];
-        const rawVector = Array.from(outputTensor.data);
-
-        const featureVector = postProcess(rawVector);
-
-        const jsonOutput = JSON.stringify(featureVector.map(v => parseFloat(v.toFixed(6))));
-        featureOutput.value = jsonOutput;
-
-        setStatus('success', '\u63d0\u53d6\u5b8c\u6210 \u2014 ' + featureVector.length + ' \u7ef4 L2 \u5f52\u4e00\u5316\u7279\u5f81\u5411\u91cf');
-        btnCopy.disabled = false;
-
-    } catch (err) {
-        console.error('[extract] Failed:', err);
-        setStatus('error', '\u7279\u5f81\u63d0\u53d6\u5931\u8d25: ' + err.message);
-    }
-}
-
-function postProcess(rawVector) {
-    let sumSq = 0;
-    for (let i = 0; i < rawVector.length; i++) {
-        sumSq += rawVector[i] * rawVector[i];
-    }
-    const l2Norm = Math.sqrt(sumSq);
-
-    if (l2Norm < 1e-8) {
-        throw new Error('\u7279\u5f81\u5411\u91cf\u5f02\u5e38\uff1a\u5168\u4e3a\u96f6');
-    }
-
-    const normalized = rawVector.map(v => v / l2Norm);
-    return normalized;
-}
-
-btnCopy.addEventListener('click', async () => {
-    try {
-        await navigator.clipboard.writeText(featureOutput.value);
-        const origText = btnCopy.textContent;
-        btnCopy.textContent = '\u5df2\u590d\u5236!';
-        setTimeout(() => { btnCopy.textContent = origText; }, 1500);
-    } catch (err) {
-        featureOutput.select();
-        document.execCommand('copy');
+    ],
+    rowClick: function (e, row) {
+        if (e.target.classList.contains("row-del-btn")) return;
+        var data = row.getData();
+        navigator.clipboard.writeText(data.full).then(function () {
+            showToast("已复制 " + data.name + " 的特征向量");
+        });
     }
 });
 
-initialize();
+var db = new Dexie("face_feature_db");
+db.version(2).stores({ features: "key" });
+
+function loadTable() {
+    setStatus("加载中...");
+    db.open().then(function () {
+        return db.features.get("face_feature");
+    }).then(function (item) {
+        if (item && item.data) {
+            origFaceLib = item.data;
+            populateTable(origFaceLib);
+            var count = Object.keys(origFaceLib).length;
+            dirty = false;
+            setStatus("共 " + count + " 条记录");
+        } else {
+            origFaceLib = {};
+            table.setData([]);
+            dirty = false;
+            setStatus("数据库为空");
+        }
+    }).catch(function (err) {
+        console.error(err);
+        table.setData([]);
+        setStatus("加载失败: " + err.message);
+    });
+}
+
+function populateTable(faceLib) {
+    var rows = [];
+    Object.keys(faceLib).forEach(function (name) {
+        var vec = faceLib[name];
+        var dim = Array.isArray(vec) ? vec.length : 0;
+        var preview = Array.isArray(vec) ? JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : "") : "";
+        rows.push({
+            name: name,
+            dim: dim,
+            preview: preview,
+            full: JSON.stringify(vec)
+        });
+    });
+    table.setData(rows);
+}
+
+function buildFaceLib() {
+    var rows = table.getData();
+    var lib = {};
+    rows.forEach(function (row) {
+        var vec = tryParseVector(row.full);
+        if (vec !== null) {
+            lib[row.name] = vec;
+        }
+    });
+    return lib;
+}
+
+function addRecord() {
+    var name = document.getElementById("addName").value.trim();
+    var vecStr = document.getElementById("addVector").value.trim();
+    if (!name) { showToast("请输入姓名", "error"); return; }
+    if (!vecStr) { showToast("请输入特征向量", "error"); return; }
+    var vec = tryParseVector(vecStr);
+    if (!vec) { showToast("特征向量不是合法的 JSON 数组", "error"); return; }
+    var rows = table.getData();
+    var existing = rows.filter(function (r) { return r.name === name; });
+    if (existing.length > 0) {
+        if (!confirm('已存在名为 "' + name + '" 的记录，是否覆盖？')) return;
+        table.getRows().forEach(function (row) {
+            if (row.getData().name === name) row.delete();
+        });
+    }
+    table.addRow({
+        name: name,
+        dim: vec.length,
+        preview: JSON.stringify(vec.slice(0, 5)) + (vec.length > 5 ? ", ..." : ""),
+        full: JSON.stringify(vec)
+    });
+    document.getElementById("addName").value = "";
+    document.getElementById("addVector").value = "";
+    markDirty();
+    showToast('已添加 "' + name + '"（' + vec.length + ' 维）');
+    document.getElementById("addName").focus();
+}
+
+async function saveToDB() {
+    var btnSave = document.getElementById("btnSave");
+    try {
+        var faceLib = buildFaceLib();
+        await db.open();
+        await db.features.put({ key: "face_feature", data: faceLib });
+        origFaceLib = faceLib;
+        dirty = false;
+        btnSave.textContent = "已保存";
+        btnSave.classList.add("saved");
+        setStatus("共 " + Object.keys(faceLib).length + " 条记录");
+        showToast("已保存到本地数据库");
+        setTimeout(function () {
+            btnSave.textContent = "保存到本地";
+            btnSave.classList.remove("saved");
+        }, 2000);
+    } catch (e) {
+        showToast("保存失败: " + e.message, "error");
+    }
+}
+
+function refreshTable() {
+    if (dirty) {
+        if (!confirm("有未保存的修改，刷新将丢失这些修改，是否继续？")) return;
+    }
+    loadTable();
+}
+
+document.getElementById("addName").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        document.getElementById("addVector").focus();
+    }
+});
+document.getElementById("addVector").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        addRecord();
+    }
+});
+
+async function exportToFile() {
+    try {
+        await db.open();
+        var item = await db.features.get("face_feature");
+        if (!item || !item.data || Object.keys(item.data).length === 0) {
+            showToast("数据库为空，没有可导出的数据", "error");
+            return;
+        }
+        var jsonStr = JSON.stringify(item.data, null, 2);
+        if (window.showSaveFilePicker) {
+            try {
+                var handle = await window.showSaveFilePicker({
+                    suggestedName: "face_feature.json",
+                    types: [{ description: "JSON Files", accept: { "application/json": [".json"] } }]
+                });
+                var writable = await handle.createWritable();
+                await writable.write(jsonStr);
+                await writable.close();
+                showToast("已导出 " + Object.keys(item.data).length + " 条记录");
+                return;
+            } catch (e) {
+                if (e.name === "AbortError") return;
+                console.warn("showSaveFilePicker failed, fallback to download:", e.message);
+            }
+        }
+        var blob = new Blob([jsonStr], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "face_feature.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("已导出 " + Object.keys(item.data).length + " 条记录");
+    } catch (e) {
+        showToast("导出失败: " + e.message, "error");
+    }
+}
+
+function importFromFile() {
+    document.getElementById("importFile").click();
+}
+
+function handleImportFile(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+        try {
+            var data = JSON.parse(e.target.result);
+            if (typeof data !== "object" || data === null || Array.isArray(data)) {
+                showToast("导入失败: JSON 格式不正确，应为 {name: [vector]} 对象", "error");
+                return;
+            }
+            var names = Object.keys(data);
+            if (names.length === 0) {
+                showToast("导入失败: JSON 对象为空", "error");
+                return;
+            }
+            var dim = null;
+            for (var i = 0; i < names.length; i++) {
+                var vec = data[names[i]];
+                if (!Array.isArray(vec)) {
+                    showToast("导入失败: \"" + names[i] + "\" 的值不是数组", "error");
+                    return;
+                }
+                if (vec.length === 0) {
+                    showToast("导入失败: \"" + names[i] + "\" 的向量为空", "error");
+                    return;
+                }
+                if (dim === null) dim = vec.length;
+                else if (vec.length !== dim) {
+                    showToast("导入失败: \"" + names[i] + "\" 维度(" + vec.length + ")与第一条(" + dim + ")不一致", "error");
+                    return;
+                }
+                for (var j = 0; j < vec.length; j++) {
+                    if (typeof vec[j] !== "number" || isNaN(vec[j])) {
+                        showToast("导入失败: \"" + names[i] + "\" 第" + (j + 1) + "项不是有效数字", "error");
+                        return;
+                    }
+                }
+            }
+            db.open().then(function () {
+                return db.features.put({ key: "face_feature", data: data });
+            }).then(function () {
+                origFaceLib = data;
+                dirty = false;
+                populateTable(data);
+                setStatus("共 " + names.length + " 条记录");
+                showToast("已导入 " + names.length + " 条记录");
+            }).catch(function (err) {
+                showToast("导入失败: " + err.message, "error");
+            });
+        } catch (err) {
+            showToast("导入失败: JSON 解析错误 - " + err.message, "error");
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+}
+
+loadTable();
 </script>
 
 </body>
