@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><head>
+<html lang="zh-CN">
+<head>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>特征提取20260802.2</title>
+    <!-- 消除 favicon 404 -->
+    <link rel="icon" href="data:,">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -112,7 +115,7 @@
                 <div class="label">照片</div>
             </div>
             <div class="canvas-box">
-                <img id="alignedImg" src="" alt="\u4eba\u8138" style="display:none;">
+                <img id="alignedImg" src="" alt="人脸" style="display:none;">
                 <canvas id="alignedCanvas" width="112" height="112" style="display:none;"></canvas>
                 <div class="label">对齐人脸</div>
             </div>
@@ -143,11 +146,42 @@ let currentImageData = null;
 let alignedFacePixels = null;
 let isNCHW = false;
 
+// 新增全局资源管理变量
+let currentBlobUrl = null;
+let imageBitmapRef = null;
+let pageHidden = false;
+let initLock = false;
+
 const TEMPLATE_POINTS = [
     { x: 38.0, y: 51.0 },
     { x: 74.0, y: 51.0 },
     { x: 56.0, y: 71.0 }
 ];
+
+// 页面可见性监听：切后台释放资源，避免aborted
+document.addEventListener('visibilitychange', () => {
+    pageHidden = document.hidden;
+    if (pageHidden) {
+        if (currentBlobUrl) {
+            URL.revokeObjectURL(currentBlobUrl);
+            currentBlobUrl = null;
+        }
+        if (imageBitmapRef) {
+            imageBitmapRef.close();
+            imageBitmapRef = null;
+        }
+        const mainCtx = mainCanvas.getContext('2d');
+        const alignCtx = alignedCanvas.getContext('2d');
+        mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+        alignCtx.clearRect(0, 0, alignedCanvas.width, alignedCanvas.height);
+    }
+});
+
+// 页面关闭/刷新统一销毁资源
+window.addEventListener('beforeunload', () => {
+    if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+    if (imageBitmapRef) imageBitmapRef.close();
+});
 
 function setStatus(type, msg) {
     status.className = 'status ' + type;
@@ -168,6 +202,8 @@ function clearFeatureOutput() {
 }
 
 async function initialize() {
+    if (initLock) return;
+    initLock = true;
     try {
         showSpinner('加载 MediaPipe WASM...');
         const vision = await FilesetResolver.forVisionTasks('./assets/wasm_full');
@@ -209,6 +245,8 @@ async function initialize() {
     } catch (err) {
         console.error('[init] Failed:', err);
         setStatus('error', '初始化失败: ' + err.message);
+    } finally {
+        initLock = false;
     }
 }
 
@@ -220,7 +258,7 @@ fileInput.addEventListener('change', async (e) => {
 
     fileInfo.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
     clearFeatureOutput();
-    setStatus('', '\u6b63\u5728\u5904\u7406...');
+    setStatus('', '正在处理...');
 
     try {
         const arrayBuffer = await file.arrayBuffer();
@@ -271,14 +309,19 @@ fileInput.addEventListener('change', async (e) => {
         const ctx = mainCanvas.getContext('2d');
         ctx.clearRect(0, 0, canvasW, canvasH);
 
-        if (rotationAngle !== 0) {
-            ctx.save();
-            ctx.translate(canvasW / 2, canvasH / 2);
-            ctx.rotate(rotationAngle);
-            ctx.drawImage(imageBitmap, -imgW / 2 * scale, -imgH / 2 * scale, imgW * scale, imgH * scale);
-            ctx.restore();
-        } else {
-            ctx.drawImage(imageBitmap, 0, 0, canvasW, canvasH);
+        // 主画布绘制增加try-catch捕获aborted
+        try {
+            if (rotationAngle !== 0) {
+                ctx.save();
+                ctx.translate(canvasW / 2, canvasH / 2);
+                ctx.rotate(rotationAngle);
+                ctx.drawImage(imageBitmap, -imgW / 2 * scale, -imgH / 2 * scale, imgW * scale, imgH * scale);
+                ctx.restore();
+            } else {
+                ctx.drawImage(imageBitmap, 0, 0, canvasW, canvasH);
+            }
+        } catch (e) {
+            if (!e.message.includes('aborted')) console.error('主画布绘制异常', e);
         }
 
         currentImageData = ctx.getImageData(0, 0, canvasW, canvasH);
@@ -287,7 +330,7 @@ fileInput.addEventListener('change', async (e) => {
 
     } catch (err) {
         console.error('[stage1] Failed:', err);
-        setStatus('error', '\u5904\u7406\u5931\u8d25: ' + err.message);
+        setStatus('error', '处理失败: ' + err.message);
     }
 });
 
@@ -306,13 +349,19 @@ async function loadImageBitmap(file) {
     return new Promise((resolve, reject) => {
         const img = new Image();
         const url = URL.createObjectURL(file);
-        img.onload = () => {
+        img.onload = async () => {
             URL.revokeObjectURL(url);
-            createImageBitmap(img).then(resolve).catch(() => resolve(img));
+            try {
+                const bmp = await createImageBitmap(img);
+                imageBitmapRef = bmp;
+                resolve(bmp);
+            } catch (e) {
+                resolve(img);
+            }
         };
         img.onerror = () => {
             URL.revokeObjectURL(url);
-            reject(new Error('\u56fe\u7247\u52a0\u8f7d\u5931\u8d25'));
+            reject(new Error('图片加载失败'));
         };
         img.src = url;
     });
@@ -320,25 +369,25 @@ async function loadImageBitmap(file) {
 
 async function runFaceDetection() {
     if (!faceDetector || !currentImageData) {
-        setStatus('error', '\u68c0\u6d4b\u5668\u6216\u56fe\u7247\u672a\u5c31\u7eea');
+        setStatus('error', '检测器或图片未就绪');
         return;
     }
 
-    showSpinner('\u4eba\u8138\u68c0\u6d4b\u4e2d...');
+    showSpinner('人脸检测中...');
 
     try {
         const result = faceDetector.detect(mainCanvas);
         const detections = result.detections || [];
 
         if (detections.length === 0) {
-            setStatus('warn', '\u672a\u68c0\u6d4b\u5230\u4eba\u8138');
+            setStatus('warn', '未检测到人脸');
             return;
         }
 
         const validDetections = detections.filter(d => getDetectionScore(d) > 0.7);
 
         if (validDetections.length === 0) {
-            setStatus('warn', '\u672a\u68c0\u6d4b\u5230\u6709\u6548\u4eba\u8138\uff08\u7f6e\u4fe1\u5ea6\u5747 \u2264 0.7\uff09');
+            setStatus('warn', '未检测到有效人脸（置信度均 ≤ 0.7）');
             drawDetections(detections, mainCanvas);
             return;
         }
@@ -352,7 +401,7 @@ async function runFaceDetection() {
 
         const keypoints = bestDetection.keypoints || [];
         if (keypoints.length < 3) {
-            setStatus('error', '\u5173\u952e\u70b9\u4e0d\u8db3\uff08\u9700 \u2265 3\uff09');
+            setStatus('error', '关键点不足（需 ≥ 3）');
             return;
         }
 
@@ -370,7 +419,7 @@ async function runFaceDetection() {
 
     } catch (err) {
         console.error('[detect] Failed:', err);
-        setStatus('error', '\u4eba\u8138\u68c0\u6d4b\u5931\u8d25: ' + err.message);
+        setStatus('error', '人脸检测失败: ' + err.message);
     }
 }
 
@@ -440,11 +489,11 @@ function drawDetection(detection, canvas, score) {
 
 async function alignFace(currentKeypoints) {
     if (!currentKeypoints || !currentImageData) {
-        setStatus('error', '\u5bf9\u9f50\u6570\u636e\u4e0d\u5b8c\u6574');
+        setStatus('error', '对齐数据不完整');
         return;
     }
 
-    showSpinner('\u4eba\u8138\u5bf9\u9f50\u4e2d...');
+    showSpinner('人脸对齐中...');
 
     try {
         const M = computeSimilarityTransform(currentKeypoints, TEMPLATE_POINTS);
@@ -455,16 +504,21 @@ async function alignFace(currentKeypoints) {
         alignedCanvas.height = 112;
         offCtx.clearRect(0, 0, 112, 112);
 
-        offCtx.save();
-        offCtx.setTransform(
-            scale * cosT,  scale * sinT,
-            -scale * sinT, scale * cosT,
-            tx, ty
-        );
-        offCtx.imageSmoothingEnabled = true;
-        offCtx.imageSmoothingQuality = 'medium';
-        offCtx.drawImage(mainCanvas, 0, 0);
-        offCtx.restore();
+        // 对齐画布绘制捕获aborted
+        try {
+            offCtx.save();
+            offCtx.setTransform(
+                scale * cosT,  scale * sinT,
+                -scale * sinT, scale * cosT,
+                tx, ty
+            );
+            offCtx.imageSmoothingEnabled = true;
+            offCtx.imageSmoothingQuality = 'medium';
+            offCtx.drawImage(mainCanvas, 0, 0);
+            offCtx.restore();
+        } catch (e) {
+            if (!e.message.includes('aborted')) console.error('对齐画布绘制异常', e);
+        }
 
         replicateBorder(offCtx);
 
@@ -472,10 +526,11 @@ async function alignFace(currentKeypoints) {
         alignedFacePixels = new Uint8ClampedArray(alignedImageData.data);
 
         alignedCanvas.toBlob(blob => {
-            if (!blob) return;
-            const url = URL.createObjectURL(blob);
-            if (alignedImg.src && alignedImg.src.startsWith('blob:')) URL.revokeObjectURL(alignedImg.src);
-            alignedImg.src = url;
+            // 页面隐藏直接放弃，杜绝aborted
+            if (pageHidden || !blob) return;
+            if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+            currentBlobUrl = URL.createObjectURL(blob);
+            alignedImg.src = currentBlobUrl;
             alignedImg.style.display = 'block';
         }, 'image/png');
 
@@ -483,7 +538,7 @@ async function alignFace(currentKeypoints) {
 
     } catch (err) {
         console.error('[align] Failed:', err);
-        setStatus('error', '\u4eba\u8138\u5bf9\u9f50\u5931\u8d25: ' + err.message);
+        setStatus('error', '人脸对齐失败: ' + err.message);
     }
 }
 
@@ -551,11 +606,11 @@ function computeSimilarityTransform(srcPoints, dstPoints) {
 
 async function extractFeature() {
     if (!ortSession || !alignedFacePixels) {
-        setStatus('error', 'ONNX\u6a21\u578b\u6216\u5bf9\u9f50\u6570\u636e\u672a\u5c31\u7eea');
+        setStatus('error', 'ONNX模型或对齐数据未就绪');
         return;
     }
 
-    showSpinner('\u7279\u5f81\u63d0\u53d6\u4e2d...');
+    showSpinner('特征提取中...');
 
     try {
         const pixels = alignedFacePixels;
@@ -598,12 +653,12 @@ async function extractFeature() {
         const jsonOutput = JSON.stringify(featureVector.map(v => parseFloat(v.toFixed(6))));
         featureOutput.value = jsonOutput;
 
-        setStatus('success', '\u63d0\u53d6\u5b8c\u6210 \u2014 ' + featureVector.length + ' \u7ef4 L2 \u5f52\u4e00\u5316\u7279\u5f81\u5411\u91cf');
+        setStatus('success', '提取完成 — ' + featureVector.length + ' 维 L2 归一化特征向量');
         btnCopy.disabled = false;
 
     } catch (err) {
         console.error('[extract] Failed:', err);
-        setStatus('error', '\u7279\u5f81\u63d0\u53d6\u5931\u8d25: ' + err.message);
+        setStatus('error', '特征提取失败: ' + err.message);
     }
 }
 
@@ -615,7 +670,7 @@ function postProcess(rawVector) {
     const l2Norm = Math.sqrt(sumSq);
 
     if (l2Norm < 1e-8) {
-        throw new Error('\u7279\u5f81\u5411\u91cf\u5f02\u5e38\uff1a\u5168\u4e3a\u96f6');
+        throw new Error('特征向量异常：全为零');
     }
 
     const normalized = rawVector.map(v => v / l2Norm);
@@ -626,7 +681,7 @@ btnCopy.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(featureOutput.value);
         const origText = btnCopy.textContent;
-        btnCopy.textContent = '\u5df2\u590d\u5236!';
+        btnCopy.textContent = '已复制!';
         setTimeout(() => { btnCopy.textContent = origText; }, 1500);
     } catch (err) {
         featureOutput.select();
@@ -636,7 +691,5 @@ btnCopy.addEventListener('click', async () => {
 
 initialize();
 </script>
-
-
-
-</body></html>
+</body>
+</html>
