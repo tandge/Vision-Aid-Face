@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="js/tabulator.min.css">
     <script src="js/Dexie.js"></script>
     <script src="js/tabulator.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="js/layer.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -83,8 +85,6 @@
         }
         .toolbar button:hover { transform: translateY(-1px); }
         .btn-refresh { background: #6c757d; }
-        .btn-save { background: #28a745; }
-        .btn-save.saved { background: #6c757d; }
         .btn-export { background: #17a2b8; }
         .btn-import { background: #ffc107; color: #333; }
         #importFile { display: none; }
@@ -129,15 +129,17 @@
             <label>姓名</label>
             <input type="text" name="addName" id="addName" placeholder="张三">
         </div>
-        <div style="flex:1;min-width:280px;">
-            <label>特征向量 (JSON数组)</label>
-            <input type="text" name="addVector" id="addVector" placeholder="[0.01, -0.02, 0.03, ...]">
+        <div style="flex:1;min-width:280px;display:flex;gap:8px;align-items:flex-end;">
+            <div style="flex:1;">
+                <label>特征向量 (JSON数组)</label>
+                <input type="text" name="addVector" id="addVector" placeholder="[0.01, -0.02, 0.03, ...]" style="width:100%;">
+            </div>
+            <button type="button" onclick="openExtractDialog()" style="padding:8px 14px;white-space:nowrap;">照片获取</button>
         </div>
         <button onclick="addRecord()">新 增</button>
     </div>
     <div class="toolbar">
         <button class="btn-refresh" onclick="refreshTable()">刷 新</button>
-        <button class="btn-save" id="btnSave" onclick="saveToDB()">保存到本地</button>
         <button class="btn-export" onclick="exportToFile()">导出人脸库</button>
         <button class="btn-import" onclick="importFromFile()">导入人脸库</button>
         <input type="file" id="importFile" accept=".json" onchange="handleImportFile(event)">
@@ -318,30 +320,58 @@ function addRecord() {
     });
     document.getElementById("addName").value = "";
     document.getElementById("addVector").value = "";
-    markDirty();
     showToast('已添加 "' + name + '"（' + vec.length + ' 维）');
     document.getElementById("addName").focus();
+    autoSaveToDB();
 }
 
-async function saveToDB() {
-    var btnSave = document.getElementById("btnSave");
+function autoSaveToDB() {
     try {
         var faceLib = buildFaceLib();
-        await db.open();
-        await db.features.put({ key: "face_feature", data: faceLib });
-        origFaceLib = faceLib;
-        dirty = false;
-        btnSave.textContent = "已保存";
-        btnSave.classList.add("saved");
-        setStatus("共 " + Object.keys(faceLib).length + " 条记录");
-        showToast("已保存到本地数据库");
-        setTimeout(function () {
-            btnSave.textContent = "保存到本地";
-            btnSave.classList.remove("saved");
-        }, 2000);
+        db.open().then(function () {
+            return db.features.put({ key: "face_feature", data: faceLib });
+        }).then(function () {
+            origFaceLib = faceLib;
+            dirty = false;
+            setStatus("共 " + Object.keys(faceLib).length + " 条记录");
+        }).catch(function (e) {
+            showToast("自动保存失败: " + e.message, "error");
+        });
     } catch (e) {
-        showToast("保存失败: " + e.message, "error");
+        showToast("自动保存失败: " + e.message, "error");
     }
+}
+
+function openExtractDialog() {
+    layer.open({
+        type: 2,
+        title: '提取人脸特征向量',
+        area: ['960px', '700px'],
+        content: 'extract.html',
+        btn: ['确定', '取消'],
+        yes: function(index) {
+            var iframeId = 'layui-layer-iframe' + index;
+            var iframe = document.getElementById(iframeId);
+            if (iframe && iframe.contentWindow) {
+                try {
+                    var iframeDoc = iframe.contentWindow.document;
+                    var outputEl = iframeDoc.getElementById('featureOutput');
+                    if (outputEl && outputEl.value && outputEl.value.trim()) {
+                        document.getElementById("addVector").value = outputEl.value.trim();
+                        showToast('已获取人脸特征向量');
+                        layer.close(index);
+                    } else {
+                        showToast('请先在弹窗中完成人脸检测和特征提取', 'error');
+                    }
+                } catch (e) {
+                    showToast('无法读取弹窗内容: ' + e.message, 'error');
+                }
+            }
+        },
+        btn2: function(index) {
+            layer.close(index);
+        }
+    });
 }
 
 function refreshTable() {
